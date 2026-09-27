@@ -535,3 +535,12 @@ const App = {
 };
 
 window.onload = App.init;
+
+// --- PWA Service Worker Registration ---
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then((registration) => console.log('PWA Ready & Cached Offline'))
+      .catch((err) => console.log('SW Registration failed: ', err));
+  });
+}
