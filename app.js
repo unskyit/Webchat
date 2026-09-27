@@ -5,9 +5,18 @@ const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3
 const STATE = { IDLE: 'IDLE', CONNECTING: 'CONNECTING', CONNECTED: 'CONNECTED', ERROR: 'ERROR' };
 let currentState = STATE.IDLE;
 let connection = null;
-let incomingFile = null;
-let fileChunks = [];
-let fileReceivedBytes = 0;
+
+// FIX: Robust tracking for incoming files
+let incomingFiles = {};
+
+// Captivating connection animation HTML
+const animHTML = `
+  <div class="link-animation">
+    <div class="orb"></div>
+    <div class="beam-container"><div class="beam"></div></div>
+    <div class="orb"></div>
+  </div>
+`;
 
 const App = {
   container: document.getElementById('app-container'),
@@ -79,8 +88,10 @@ const App = {
     App.setState(STATE.CONNECTING);
     const view = Utils.createElement('div', '', 'view');
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = `<h1>Room Created</h1><p>Tell your friend to enter PIN:</p><h2 class="otp-input">${pin}</h2><p>Waiting for them to join... (Expires in 5m)</p>`;
+    // Injected the alive animation
+    card.innerHTML = `<h1 class="brand">Room Created</h1><p>Tell your friend to enter PIN:</p><h2 class="otp-input">${pin}</h2>${animHTML}<p style="margin-top:10px; font-size:0.85rem;">Waiting for them to join... (Expires in 5m)</p>`;
     view.appendChild(card); App.container.appendChild(view);
+    
     connection = new P2PConnection(App.onConnectionStateChange, App.onMessageRouter);
     try {
       const offerStr = await connection.generateOffer();
@@ -102,8 +113,9 @@ const App = {
     App.setState(STATE.CONNECTING);
     const view = Utils.createElement('div', '', 'view');
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = `<h1>Connecting...</h1><p>Looking for PIN: ${pin}</p>`;
+    card.innerHTML = `<h1>Connecting...</h1><p>Looking for PIN: ${pin}</p>${animHTML}`;
     view.appendChild(card); App.container.appendChild(view);
+    
     connection = new P2PConnection(App.onConnectionStateChange, App.onMessageRouter);
     try {
       const res = await fetch(`${APP_SCRIPT_URL}?room=${pin}&type=get_offer`);
@@ -112,7 +124,7 @@ const App = {
       const offerSignal = Protocol.validateSignal(data.payload, 'offer');
       const answerStr = await connection.acceptOfferAndGenerateAnswer(offerSignal);
       await fetch(APP_SCRIPT_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ room: pin, type: 'answer', payload: answerStr }) });
-      card.innerHTML = '<h1>Securing P2P Link...</h1><p>Establishing direct connection...</p>';
+      card.innerHTML = `<h1 class="brand">Securing P2P Link...</h1><p>Establishing direct connection...</p>${animHTML}`;
     } catch(e) { App.renderError(e.message); }
   },
 
@@ -120,10 +132,9 @@ const App = {
     App.setState(STATE.CONNECTING);
     const view = Utils.createElement('div', '', 'view');
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = '<h1>Generating...</h1><p>Securing encryption keys (please wait)...</p>';
+    card.innerHTML = `<h1>Generating...</h1><p>Securing encryption keys (please wait)...</p>${animHTML}`;
     view.appendChild(card); App.container.appendChild(view);
 
-    // Yield to let the browser paint the "Please Wait" screen
     setTimeout(async () => {
       connection = new P2PConnection(App.onConnectionStateChange, App.onMessageRouter);
       try {
@@ -131,18 +142,15 @@ const App = {
         const base64 = Utils.encodeBase64Url(offerStr);
         const url = `${window.location.origin}${window.location.pathname}#join=${base64}`;
 
-        card.innerHTML = '<h1>Offline Room</h1><p>Scan QR or copy code to join.</p>';
+        card.innerHTML = '<h1 class="brand">Offline Room</h1><p>Scan QR or copy code to join.</p>';
         const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; card.appendChild(qrDiv);
-        
-        // Generate QR Code with Low Error Correction to fit the huge string
         new QRCode(qrDiv, { text: url, width: 200, height: 200, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
 
-        // Add UI elements after QR renders
         setTimeout(() => {
           const canvas = document.querySelector('#qrcode canvas');
           if (canvas) {
             const btnDl = Utils.createElement('button', '💾 Save QR Image', 'secondary');
-            btnDl.onclick = () => { const link = document.createElement('a'); link.download = 'P2P-Room.png'; link.href = canvas.toDataURL("image/png"); link.click(); };
+            btnDl.onclick = () => { const link = document.createElement('a'); link.download = 'Webchat-Room.png'; link.href = canvas.toDataURL("image/png"); link.click(); };
             card.appendChild(btnDl);
           }
           const btnCopy = Utils.createElement('button', 'Copy Text Code', 'secondary');
@@ -171,7 +179,7 @@ const App = {
       const base64 = Utils.encodeBase64Url(ansStr);
       const view = Utils.createElement('div', '', 'view');
       const card = Utils.createElement('div', '', 'card');
-      card.innerHTML = '<h1>Send Answer</h1><p>Copy this and send to Host:</p>';
+      card.innerHTML = '<h1 class="brand">Send Answer</h1><p>Copy this and send to Host:</p>';
       const txt = Utils.createElement('textarea'); txt.value = base64; txt.readOnly = true; txt.rows = 4;
       card.appendChild(txt);
       const btnCopy = Utils.createElement('button', 'Copy Answer');
@@ -185,28 +193,34 @@ const App = {
     const view = Utils.createElement('div', '', 'view');
     view.style.justifyContent = 'flex-start'; view.style.height = '100%';
 
-    // NEW: Header with End Chat Button
-    const chatHeader = Utils.createElement('div');
-    chatHeader.id = 'chat-header-bar';
-    chatHeader.innerHTML = '<h3>Live Session</h3>';
-    const btnEnd = Utils.createElement('button', 'End Chat');
-    btnEnd.id = 'btn-end';
+    const chatHeader = Utils.createElement('div'); chatHeader.id = 'chat-header-bar';
+    chatHeader.innerHTML = '<h3 class="brand">Live Session</h3>';
+    const btnEnd = Utils.createElement('button', 'End Chat'); btnEnd.id = 'btn-end';
     btnEnd.onclick = () => { if(connection) connection.destroy(); App.renderIdle(); };
-    chatHeader.appendChild(btnEnd);
-    view.appendChild(chatHeader);
+    chatHeader.appendChild(btnEnd); view.appendChild(chatHeader);
 
     const log = Utils.createElement('div'); log.id = 'chat-log';
     log.appendChild(Utils.createElement('div', 'Encrypted P2P connection active.', 'msg system'));
     view.appendChild(log);
 
     const inputContainer = Utils.createElement('div'); inputContainer.id = 'chat-input-container';
+    
+    // FIX: Lock queue to prevent overlapping files
     const fileInput = Utils.createElement('input'); fileInput.type = 'file'; fileInput.style.display = 'none';
+    let isSendingFile = false;
+
     fileInput.onchange = (e) => {
-      const f = e.target.files[0]; if (!f) return;
-      App.appendSystemMessage(`Sending ${f.name}... (0%)`, 'upload');
+      const f = e.target.files[0]; 
+      if (!f || isSendingFile) return;
+      isSendingFile = true;
+      const fileId = 'upload-' + Utils.generateId();
+      App.appendFileBox(f.name, f.size, fileId, true);
+      
       connection.sendFile(f, (prog) => {
-        App.updateSystemMessage('upload', `Sending ${f.name}... (${Math.round(prog * 100)}%)`);
-        if (prog === 1) App.updateSystemMessage('upload', `Sent ✅`);
+        App.updateFileBox(fileId, prog * 100);
+      }, () => {
+        App.completeFileBox(fileId, null, null);
+        isSendingFile = false;
       });
       fileInput.value = '';
     };
@@ -233,27 +247,36 @@ const App = {
   onMessageRouter(msg) {
     if (msg.type === 'chat') App.appendMessage(msg.text, false);
     else if (msg.type === 'file_start') {
-      incomingFile = msg; fileChunks = []; fileReceivedBytes = 0;
-      App.appendFileBox(msg.name, msg.size, 'download');
+      incomingFiles[msg.id] = { name: msg.name, size: msg.size, mimeType: msg.mimeType, chunks: [], receivedBytes: 0 };
+      App.appendFileBox(msg.name, msg.size, msg.id, false);
     } 
-    else if (msg.type === 'file_chunk' && incomingFile) {
-      fileChunks.push(msg.data); fileReceivedBytes += msg.data.byteLength;
-      App.updateFileBox('download', (fileReceivedBytes / incomingFile.size) * 100);
+    else if (msg.type === 'file_chunk') {
+      const activeFileId = Object.keys(incomingFiles)[0];
+      if (activeFileId) {
+         const activeFile = incomingFiles[activeFileId];
+         activeFile.chunks.push(msg.data); 
+         activeFile.receivedBytes += msg.data.byteLength;
+         App.updateFileBox(activeFileId, (activeFile.receivedBytes / activeFile.size) * 100);
+      }
     } 
-    else if (msg.type === 'file_end' && incomingFile) {
-      const blob = new Blob(fileChunks); const url = URL.createObjectURL(blob);
-      App.completeFileBox('download', url); incomingFile = null; fileChunks = [];
+    else if (msg.type === 'file_end') {
+      const activeFile = incomingFiles[msg.id];
+      if (activeFile) {
+         // Fix: Enforces exact file type to avoid .txt fallbacks
+         const blob = new Blob(activeFile.chunks, { type: activeFile.mimeType || 'application/octet-stream' }); 
+         const url = URL.createObjectURL(blob);
+         App.completeFileBox(msg.id, url, activeFile.name);
+         delete incomingFiles[msg.id];
+      }
     }
   },
 
   appendMessage(text, isSelf) {
     const log = document.getElementById('chat-log'); if (!log) return;
     const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-    
     const wrap = Utils.createElement('div', '', isSelf ? 'msg-wrap self' : 'msg-wrap peer');
     const bubble = Utils.createElement('div', text, 'msg-bubble');
     const timeEl = Utils.createElement('div', time, 'msg-time');
-    
     wrap.appendChild(bubble); wrap.appendChild(timeEl); log.appendChild(wrap);
     log.scrollTop = log.scrollHeight;
   },
@@ -264,41 +287,54 @@ const App = {
     log.appendChild(msgEl); log.scrollTop = log.scrollHeight;
   },
 
-  updateSystemMessage(id, text) {
-    const el = document.getElementById('sys-' + id); if (el) el.textContent = text;
-  },
-
-  appendFileBox(name, size, id) {
+  // FIX: Added smooth progress bar HTML
+  appendFileBox(name, size, id, isUpload) {
     const log = document.getElementById('chat-log');
-    const wrap = Utils.createElement('div', '', 'msg-wrap peer');
+    const wrap = Utils.createElement('div', '', 'msg-wrap ' + (isUpload ? 'self' : 'peer'));
     const box = Utils.createElement('div', '', 'file-box');
     box.id = 'filebox-' + id;
-    box.innerHTML = `<svg class="file-icon" viewBox="0 0 24 24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
-      <div class="file-info"><div class="file-name">${name}</div><div class="file-size" id="fileprog-${id}">0%</div></div>`;
+    box.innerHTML = `
+      <svg class="file-icon" viewBox="0 0 24 24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+      <div class="file-info">
+        <div class="file-name">${name}</div>
+        <div class="file-size" id="fileprog-text-${id}">0%</div>
+        <div class="progress-bar"><div class="progress-fill" id="fileprog-bar-${id}" style="width: 0%"></div></div>
+      </div>`;
     wrap.appendChild(box);
     wrap.appendChild(Utils.createElement('div', new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 'msg-time'));
     log.appendChild(wrap); log.scrollTop = log.scrollHeight;
   },
 
+  // FIX: Exact percentage rounded down for smooth visual bar
   updateFileBox(id, percent) {
-    const el = document.getElementById('fileprog-' + id);
-    if (el) el.textContent = `Receiving... ${Math.round(percent)}%`;
+    const text = document.getElementById('fileprog-text-' + id);
+    const bar = document.getElementById('fileprog-bar-' + id);
+    const p = Math.floor(percent);
+    if (text) text.textContent = `Transferring... ${p}%`;
+    if (bar) bar.style.width = `${p}%`;
   },
 
-  completeFileBox(id, url) {
-    const el = document.getElementById('fileprog-' + id);
-    if (el) {
-      el.textContent = "Ready";
-      const a = document.createElement('a'); a.href = url; a.download = 'download'; a.textContent = 'Save File'; 
-      a.style.color = 'var(--primary)'; a.style.fontSize = '0.8rem'; a.style.fontWeight = 'bold'; a.style.textDecoration = 'none';
-      el.innerHTML = ''; el.appendChild(a);
+  // FIX: Accurate saving using exact filename
+  completeFileBox(id, url, filename) {
+    const text = document.getElementById('fileprog-text-' + id);
+    const bar = document.getElementById('fileprog-bar-' + id);
+    if (bar) bar.style.width = `100%`;
+    if (text) {
+      if (url) {
+        text.innerHTML = '';
+        const a = document.createElement('a'); 
+        a.href = url; a.download = filename; a.textContent = '💾 Save File'; 
+        a.className = 'download-link';
+        text.appendChild(a);
+      } else {
+        text.textContent = 'Sent ✅';
+      }
     }
   },
 
   onConnectionStateChange(status, message = "") {
     if (status === 'CONNECTED') App.renderChat();
     else if (status === 'CLOSED' || status.startsWith('ERR_')) {
-      // NEW: Graceful disconnect logic
       if (currentState === STATE.CONNECTED) {
         App.appendSystemMessage(`⚠️ ${message} The room is now closed.`, 'disconnect');
         const inputCont = document.getElementById('chat-input-container');
