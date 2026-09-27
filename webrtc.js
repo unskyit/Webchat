@@ -38,7 +38,7 @@ class P2PConnection {
 
   _setupDataChannel(channel) {
     this.dc = channel;
-    this.dc.binaryType = "arraybuffer"; // Support binary files
+    this.dc.binaryType = "arraybuffer"; 
     this.dc.onopen = () => {
       this.resetIdleTimer();
       this.onStateChange("CONNECTED");
@@ -49,14 +49,12 @@ class P2PConnection {
     };
     this.dc.onmessage = (event) => {
       this.resetIdleTimer();
-      
       if (typeof event.data === 'string') {
         try {
           const msg = JSON.parse(event.data);
-          this.onMessage(msg); // Route Chat or File Metadata to app.js
-        } catch(e) { /* Ignore invalid JSON */ }
+          this.onMessage(msg); 
+        } catch(e) {}
       } else {
-        // It's raw binary file data!
         this.onMessage({ type: 'file_chunk', data: event.data });
       }
     };
@@ -110,15 +108,20 @@ class P2PConnection {
     return true;
   }
 
-  // ==== NEW: THE MAGIC FILE TRANSFER ====
-  async sendFile(file, onProgress) {
+  // FIX: Passes exact file type (mimeType), and supports onComplete callback
+  async sendFile(file, onProgress, onComplete) {
     if (!this.dc || this.dc.readyState !== 'open') return;
     const fileId = Utils.generateId();
     
-    // 1. Tell the friend a file is coming
-    this.dc.send(JSON.stringify({ type: 'file_start', name: file.name, size: file.size, id: fileId }));
+    this.dc.send(JSON.stringify({ 
+      type: 'file_start', 
+      name: file.name, 
+      size: file.size, 
+      mimeType: file.type || 'application/octet-stream', 
+      id: fileId 
+    }));
     
-    const chunkSize = 16384; // 16KB chunks (WebRTC sweet spot)
+    const chunkSize = 16384;
     let offset = 0;
     
     const readSlice = (o) => new Promise((resolve, reject) => {
@@ -128,22 +131,18 @@ class P2PConnection {
       reader.readAsArrayBuffer(file.slice(o, o + chunkSize));
     });
 
-    // 2. Stream the binary chunks
     while (offset < file.size) {
       const chunk = await readSlice(offset);
-      
-      // Backpressure: If the browser buffer gets full, pause for 50ms so we don't crash
       while (this.dc.bufferedAmount > 1024 * 1024) { 
         await new Promise(r => setTimeout(r, 50));
       }
-      
       this.dc.send(chunk);
       offset += chunk.byteLength;
       if (onProgress) onProgress(offset / file.size);
     }
     
-    // 3. Tell the friend the file is done
     this.dc.send(JSON.stringify({ type: 'file_end', id: fileId }));
+    if (onComplete) onComplete();
   }
 
   destroy() {
