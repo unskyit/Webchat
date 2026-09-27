@@ -1,0 +1,17 @@
+{
+  "name": "Webchat",
+  "short_name": "Webchat",
+  "description": "True P2P Serverless Chat",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
