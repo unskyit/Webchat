@@ -1,4 +1,4 @@
-// app.js - App State, Cloud OTP, Chat UI, Multi-QR (6 Parts) & Dynamic Camera
+// app.js - App State, Cloud OTP, Chat UI, Multi-QR Settings & Dynamic Camera
 
 const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3dP8CzVtTl1JCrNyibhOypH5lKyB7adpK6pBMUjk69WKruStFLbpwQ/exec"; 
 
@@ -16,13 +16,15 @@ const animHTML = `
   </div>
 `;
 
+// FIX: Reads user's slider setting directly to generate perfectly sliced QRs
 function createQRChunks(base64) {
   const chunks = [];
-  const TOTAL_CHUNKS = 6;
+  const TOTAL_CHUNKS = App.settings.qrChunks;
   const chunkSize = Math.ceil(base64.length / TOTAL_CHUNKS);
   for(let i = 0; i < base64.length; i += chunkSize) {
     chunks.push(base64.substring(i, i + chunkSize));
   }
+  if (TOTAL_CHUNKS === 1) return [`WCT:1/1:${base64}`]; // Fallback for single QR
   return chunks.map((c, i) => `WCT:${i+1}/${chunks.length}:${c}`);
 }
 
@@ -33,7 +35,7 @@ function extractCode(text) {
 
 const App = {
   container: document.getElementById('app-container'),
-  settings: { darkMode: false, useCloud: true },
+  settings: { darkMode: false, useCloud: true, qrChunks: 3 }, // Added qrChunks to state
 
   init() {
     document.getElementById('btn-settings').onclick = () => document.getElementById('settings-overlay').classList.remove('hidden');
@@ -49,6 +51,16 @@ const App = {
       document.getElementById('mode-desc').textContent = App.settings.useCloud ? "Cloud OTP (Requires Internet)" : "Manual/QR (Works Offline)";
       App.renderIdle(); 
     };
+
+    // Link the new slider UI to the application state
+    const qrSlider = document.getElementById('qr-slider');
+    const qrSliderVal = document.getElementById('qr-slider-val');
+    if (qrSlider) {
+      qrSlider.oninput = (e) => {
+        App.settings.qrChunks = parseInt(e.target.value);
+        qrSliderVal.textContent = App.settings.qrChunks;
+      };
+    }
 
     if (window.location.hash.startsWith('#join=')) {
       const payloadStr = Utils.decodeBase64Url(window.location.hash.substring(6));
@@ -160,7 +172,6 @@ const App = {
        readerWrapper.style.display = 'block';
        html5QrCode = new Html5Qrcode("reader-container");
        try {
-          // FIX: Dynamic qrbox prevents squishing on weird aspect ratios
           await html5QrCode.start(
             deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" }, 
             { 
@@ -235,27 +246,32 @@ const App = {
     const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; 
     qrWrap.appendChild(qrDiv);
 
-    const navWrap = Utils.createElement('div', '', 'qr-carousel');
-    const btnPrev = Utils.createElement('button', '❮', 'secondary qr-nav-btn');
-    const btnNext = Utils.createElement('button', '❯', 'secondary qr-nav-btn');
-    const lblStatus = Utils.createElement('span', `QR 1 of ${chunks.length}`, 'qr-status');
-    
-    navWrap.appendChild(btnPrev); navWrap.appendChild(lblStatus); navWrap.appendChild(btnNext);
-    if(chunks.length > 1) qrWrap.appendChild(navWrap);
-    container.appendChild(qrWrap);
+    // Only render carousel controls if there are multiple chunks
+    if(chunks.length > 1) {
+      const navWrap = Utils.createElement('div', '', 'qr-carousel');
+      const btnPrev = Utils.createElement('button', '❮', 'secondary qr-nav-btn');
+      const btnNext = Utils.createElement('button', '❯', 'secondary qr-nav-btn');
+      const lblStatus = Utils.createElement('span', `QR 1 of ${chunks.length}`, 'qr-status');
+      
+      navWrap.appendChild(btnPrev); navWrap.appendChild(lblStatus); navWrap.appendChild(btnNext);
+      qrWrap.appendChild(navWrap);
 
-    const updateQR = () => {
-      qrDiv.innerHTML = '';
-      new QRCode(qrDiv, { text: chunks[currentIndex], width: 250, height: 250, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
-      lblStatus.textContent = `QR ${currentIndex + 1} of ${chunks.length}`;
-      btnPrev.disabled = currentIndex === 0;
-      btnNext.disabled = currentIndex === chunks.length - 1;
-    };
+      const updateQR = () => {
+        qrDiv.innerHTML = '';
+        new QRCode(qrDiv, { text: chunks[currentIndex], width: 250, height: 250, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
+        lblStatus.textContent = `QR ${currentIndex + 1} of ${chunks.length}`;
+        btnPrev.disabled = currentIndex === 0;
+        btnNext.disabled = currentIndex === chunks.length - 1;
+      };
+      
+      btnPrev.onclick = () => { if(currentIndex > 0) { currentIndex--; updateQR(); }};
+      btnNext.onclick = () => { if(currentIndex < chunks.length - 1) { currentIndex++; updateQR(); }};
+      setTimeout(updateQR, 100);
+    } else {
+      setTimeout(() => new QRCode(qrDiv, { text: chunks[0], width: 250, height: 250, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L }), 100);
+    }
     
-    btnPrev.onclick = () => { if(currentIndex > 0) { currentIndex--; updateQR(); }};
-    btnNext.onclick = () => { if(currentIndex < chunks.length - 1) { currentIndex++; updateQR(); }};
-    
-    setTimeout(updateQR, 100);
+    container.appendChild(qrWrap);
   },
 
   async hostCloudRoom(pin) {
