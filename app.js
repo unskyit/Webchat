@@ -1,6 +1,7 @@
 // app.js - App State, Settings, Cloud OTP, and Chat UI
 
 // 🚨 PASTE YOUR GOOGLE APP SCRIPT URL HERE 🚨
+// Example: "https://script.google.com/macros/s/AKfycb.../exec"
 const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3dP8CzVtTl1JCrNyibhOypH5lKyB7adpK6pBMUjk69WKruStFLbpwQ/exec"; 
 
 const STATE = { IDLE: 'IDLE', CONNECTING: 'CONNECTING', CONNECTED: 'CONNECTED', ERROR: 'ERROR' };
@@ -51,7 +52,10 @@ const App = {
     }
   },
 
-  setState(newState) { currentState = newState; App.container.innerHTML = ''; },
+  setState(newState) { 
+    currentState = newState; 
+    App.container.innerHTML = ''; 
+  },
 
   renderIdle() {
     App.setState(STATE.IDLE);
@@ -64,7 +68,7 @@ const App = {
       // CLOUD OTP MODE
       const inputOTP = Utils.createElement('input', '', 'otp-input');
       inputOTP.placeholder = "e.g. secret45";
-      inputOTP.maxLength = 10;
+      inputOTP.maxLength = 15;
       
       const btnHost = Utils.createElement('button', 'Create with PIN');
       btnHost.onclick = () => { if(inputOTP.value.trim()) App.hostCloudRoom(inputOTP.value.trim().toLowerCase()); };
@@ -86,6 +90,7 @@ const App = {
         if (code) {
           const sig = Protocol.validateSignal(Utils.decodeBase64Url(code), 'offer');
           if (sig) App.handleManualJoin(sig);
+          else alert("Invalid code.");
         }
       };
 
@@ -97,7 +102,7 @@ const App = {
     App.container.appendChild(view);
   },
 
-  // ================= CLOUD OTP LOGIC =================
+  // ================= CLOUD OTP LOGIC (CACHE-BACKED) =================
   
   async hostCloudRoom(pin) {
     App.setState(STATE.CONNECTING);
@@ -113,9 +118,11 @@ const App = {
     connection = new P2PConnection(App.onConnectionStateChange, App.onMessageRouter);
     try {
       const offerStr = await connection.generateOffer();
-      // Send offer to Google Sheet
+      
+      // Send offer to Google Cache (Using text/plain to bypass CORS blocks)
       await fetch(APP_SCRIPT_URL, {
         method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ room: pin, type: 'offer', payload: offerStr })
       });
 
@@ -130,7 +137,9 @@ const App = {
           if (answerSignal) connection.acceptAnswer(answerSignal);
         }
       }, 3000);
-    } catch(e) { App.renderError("Cloud connection failed."); }
+    } catch(e) { 
+      App.renderError("Cloud connection failed. Check your internet or App Script URL."); 
+    }
   },
 
   async joinCloudRoom(pin) {
@@ -144,7 +153,7 @@ const App = {
 
     connection = new P2PConnection(App.onConnectionStateChange, App.onMessageRouter);
     try {
-      // Get offer from Google Sheet
+      // Get offer from Google Cache
       const res = await fetch(`${APP_SCRIPT_URL}?room=${pin}&type=get_offer`);
       const data = await res.json();
       if (!data.payload) throw new Error("Room not found or expired.");
@@ -152,14 +161,17 @@ const App = {
       const offerSignal = Protocol.validateSignal(data.payload, 'offer');
       const answerStr = await connection.acceptOfferAndGenerateAnswer(offerSignal);
       
-      // Post answer back
+      // Post answer back to Google Cache
       await fetch(APP_SCRIPT_URL, {
         method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ room: pin, type: 'answer', payload: answerStr })
       });
       
-      card.innerHTML = '<h1>Securing P2P Link...</h1>';
-    } catch(e) { App.renderError(e.message); }
+      card.innerHTML = '<h1>Securing P2P Link...</h1><p>Establishing direct connection...</p>';
+    } catch(e) { 
+      App.renderError(e.message); 
+    }
   },
 
   // ================= MANUAL / OFFLINE LOGIC =================
@@ -181,10 +193,11 @@ const App = {
       const qrDiv = Utils.createElement('div');
       qrDiv.id = 'qrcode';
       card.appendChild(qrDiv);
+      // We wrap QRCode in setTimeout to ensure the DOM has painted the div
       setTimeout(() => new QRCode(qrDiv, { text: url, width: 180, height: 180, colorDark : "#000000", colorLight : "#ffffff" }), 100);
 
       const btnCopy = Utils.createElement('button', 'Copy Text Code', 'secondary');
-      btnCopy.onclick = () => { navigator.clipboard.writeText(base64); btnCopy.textContent = "Copied!"; };
+      btnCopy.onclick = () => { navigator.clipboard.writeText(base64); btnCopy.textContent = "Copied!"; setTimeout(() => btnCopy.textContent = "Copy Text Code", 2000); };
       card.appendChild(btnCopy);
 
       const inputAnswer = Utils.createElement('input');
@@ -193,7 +206,11 @@ const App = {
         const dec = Utils.decodeBase64Url(e.target.value.trim());
         if(dec) {
           const ans = Protocol.validateSignal(dec, 'answer');
-          if(ans) connection.acceptAnswer(ans);
+          if(ans) {
+             inputAnswer.value = 'Connecting...';
+             inputAnswer.disabled = true;
+             connection.acceptAnswer(ans);
+          }
         }
       };
       card.appendChild(inputAnswer);
@@ -220,7 +237,7 @@ const App = {
       card.appendChild(txt);
 
       const btnCopy = Utils.createElement('button', 'Copy Answer');
-      btnCopy.onclick = () => navigator.clipboard.writeText(base64);
+      btnCopy.onclick = () => { navigator.clipboard.writeText(base64); btnCopy.textContent = "Copied!"; };
       card.appendChild(btnCopy);
       
       view.appendChild(card);
@@ -244,8 +261,10 @@ const App = {
     const inputContainer = Utils.createElement('div');
     inputContainer.id = 'chat-input-container';
     
+    // Hidden File Input
     const fileInput = Utils.createElement('input');
-    fileInput.type = 'file'; fileInput.style.display = 'none';
+    fileInput.type = 'file'; 
+    fileInput.style.display = 'none';
     fileInput.onchange = (e) => {
       const f = e.target.files[0];
       if (!f) return;
@@ -257,14 +276,17 @@ const App = {
       fileInput.value = '';
     };
 
+    // Paperclip Button
     const btnFile = Utils.createElement('button');
     btnFile.id = 'btn-file';
     btnFile.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>';
     btnFile.onclick = () => fileInput.click();
 
+    // Text Input
     const inputField = Utils.createElement('input');
     inputField.placeholder = "Type message...";
     
+    // Send Button
     const btnSend = Utils.createElement('button');
     btnSend.id = 'btn-send';
     btnSend.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>';
@@ -284,27 +306,38 @@ const App = {
     inputContainer.appendChild(btnFile);
     inputContainer.appendChild(inputField);
     inputContainer.appendChild(btnSend);
+    
+    view.appendChild(log);
     view.appendChild(inputContainer);
     App.container.appendChild(view);
+    
+    // Auto-focus input on desktop, generally safe to call
+    setTimeout(() => inputField.focus(), 100);
   },
 
   // ================= ROUTER & HELPERS =================
   
   onMessageRouter(msg) {
-    if (msg.type === 'chat') App.appendMessage(msg.text, false);
+    if (msg.type === 'chat') {
+      App.appendMessage(msg.text, false);
+    } 
     else if (msg.type === 'file_start') {
-      incomingFile = msg; fileChunks = []; fileReceivedBytes = 0;
+      incomingFile = msg; 
+      fileChunks = []; 
+      fileReceivedBytes = 0;
       App.appendFileBox(msg.name, msg.size, 'download');
     } 
     else if (msg.type === 'file_chunk' && incomingFile) {
-      fileChunks.push(msg.data); fileReceivedBytes += msg.data.byteLength;
+      fileChunks.push(msg.data); 
+      fileReceivedBytes += msg.data.byteLength;
       App.updateFileBox('download', (fileReceivedBytes / incomingFile.size) * 100);
     } 
     else if (msg.type === 'file_end' && incomingFile) {
       const blob = new Blob(fileChunks);
       const url = URL.createObjectURL(blob);
       App.completeFileBox('download', url);
-      incomingFile = null; fileChunks = [];
+      incomingFile = null; 
+      fileChunks = [];
     }
   },
 
@@ -330,7 +363,7 @@ const App = {
     if (el) el.textContent = text;
   },
 
-  // Beautiful SVG File UI
+  // Beautiful SVG File UI Builder
   appendFileBox(name, size, id) {
     const log = document.getElementById('chat-log');
     const box = Utils.createElement('div', '', 'file-box msg peer');
@@ -353,13 +386,18 @@ const App = {
 
   completeFileBox(id, url) {
     const el = document.getElementById('fileprog-' + id);
-    const box = document.getElementById('filebox-' + id);
-    if (el && box) {
+    if (el) {
       el.textContent = "Ready";
       const a = document.createElement('a');
-      a.href = url; a.download = 'download'; a.textContent = 'Save File'; a.style.color = 'var(--primary)';
-      a.style.fontSize = '0.8rem'; a.style.fontWeight = 'bold';
-      el.innerHTML = ''; el.appendChild(a);
+      a.href = url; 
+      a.download = 'download'; 
+      a.textContent = 'Save File'; 
+      a.style.color = 'var(--primary)';
+      a.style.fontSize = '0.8rem'; 
+      a.style.fontWeight = 'bold';
+      a.style.textDecoration = 'none';
+      el.innerHTML = ''; 
+      el.appendChild(a);
     }
   },
 
@@ -371,16 +409,20 @@ const App = {
   renderError(message) {
     App.setState(STATE.ERROR);
     if(connection) connection.destroy();
+    
     const view = Utils.createElement('div', '', 'view');
     const card = Utils.createElement('div', '', 'card');
     card.appendChild(Utils.createElement('h1', 'Disconnected'));
     card.appendChild(Utils.createElement('p', message));
+    
     const btnHome = Utils.createElement('button', 'Go Home');
     btnHome.onclick = () => App.renderIdle();
     card.appendChild(btnHome);
+    
     view.appendChild(card);
     App.container.appendChild(view);
   }
 };
 
+// Boot up
 window.onload = App.init;
