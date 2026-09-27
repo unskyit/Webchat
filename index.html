@@ -25,11 +25,13 @@
   <!-- Settings Overlay -->
   <div id="settings-overlay" class="hidden">
     <div class="settings-card">
-      <h3>Settings</h3>
+      <h3 style="margin-bottom: 20px;">Settings</h3>
+      
       <div class="setting-row">
         <span>Dark Mode</span>
         <label class="switch"><input type="checkbox" id="toggle-theme"><span class="slider"></span></label>
       </div>
+      
       <div class="setting-row">
         <div class="setting-text">
           <span>Connection Mode</span>
@@ -37,14 +39,23 @@
         </div>
         <label class="switch"><input type="checkbox" id="toggle-mode" checked><span class="slider"></span></label>
       </div>
-      <button id="btn-close-settings" class="secondary">Close</button>
+
+      <div class="setting-row">
+        <div class="setting-text">
+          <span>QR Code Splitter</span>
+          <small>Fewer = Faster. More = Easier to scan.</small>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <input type="range" id="qr-slider" min="1" max="10" value="3" style="width: 80px; padding: 0; margin: 0; border: none; background: transparent;">
+          <span id="qr-slider-val" style="font-weight: bold; width: 24px; text-align: right;">3</span>
+        </div>
+      </div>
+
+      <button id="btn-close-settings" class="secondary" style="margin-top: 10px;">Close</button>
     </div>
   </div>
 
   <main id="app-container"></main>
-
-  <!-- Hidden Container for QR Camera Processing -->
-  <div id="reader-container" style="display: none; width: 100%; max-width: 400px; margin: 0 auto;"></div>
 
   <script src="qrcode.min.js"></script>
   <script src="html5-qrcode.min.js"></script>
