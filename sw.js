@@ -1,4 +1,4 @@
-const CACHE_NAME = 'webchat-v2';
+const CACHE_NAME = 'webchat-v3';
 const ASSETS = [
   './',
   './index.html',
