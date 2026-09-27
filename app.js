@@ -1,4 +1,4 @@
-// app.js - App State, Cloud OTP, Chat UI, Multi-QR Settings & Dynamic Camera
+// app.js - App State, Cloud OTP, Chat UI, Multi-QR Settings, Dynamic Camera & PWA Installer
 
 const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3dP8CzVtTl1JCrNyibhOypH5lKyB7adpK6pBMUjk69WKruStFLbpwQ/exec"; 
 
@@ -7,6 +7,7 @@ let currentState = STATE.IDLE;
 let connection = null;
 let incomingFiles = {};
 let html5QrCode = null; 
+let deferredPrompt = null; // Stores the PWA installation prompt
 
 const animHTML = `
   <div class="link-animation">
@@ -16,7 +17,6 @@ const animHTML = `
   </div>
 `;
 
-// FIX: Reads user's slider setting directly to generate perfectly sliced QRs
 function createQRChunks(base64) {
   const chunks = [];
   const TOTAL_CHUNKS = App.settings.qrChunks;
@@ -24,7 +24,7 @@ function createQRChunks(base64) {
   for(let i = 0; i < base64.length; i += chunkSize) {
     chunks.push(base64.substring(i, i + chunkSize));
   }
-  if (TOTAL_CHUNKS === 1) return [`WCT:1/1:${base64}`]; // Fallback for single QR
+  if (TOTAL_CHUNKS === 1) return [`WCT:1/1:${base64}`]; 
   return chunks.map((c, i) => `WCT:${i+1}/${chunks.length}:${c}`);
 }
 
@@ -35,9 +35,10 @@ function extractCode(text) {
 
 const App = {
   container: document.getElementById('app-container'),
-  settings: { darkMode: false, useCloud: true, qrChunks: 3 }, // Added qrChunks to state
+  settings: { darkMode: false, useCloud: true, qrChunks: 3 }, 
 
   init() {
+    // --- 1. UI Settings Listeners ---
     document.getElementById('btn-settings').onclick = () => document.getElementById('settings-overlay').classList.remove('hidden');
     document.getElementById('btn-close-settings').onclick = () => document.getElementById('settings-overlay').classList.add('hidden');
     
@@ -52,7 +53,6 @@ const App = {
       App.renderIdle(); 
     };
 
-    // Link the new slider UI to the application state
     const qrSlider = document.getElementById('qr-slider');
     const qrSliderVal = document.getElementById('qr-slider-val');
     if (qrSlider) {
@@ -62,6 +62,44 @@ const App = {
       };
     }
 
+    // --- 2. PWA Installation Logic ---
+    const btnInstall = document.getElementById('btn-install-pwa');
+    
+    // Listen for the browser signaling that the app is ready to be installed
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault(); // Prevent default browser mini-infobar
+      deferredPrompt = e; // Stash the event
+      if (btnInstall) btnInstall.style.display = 'block'; // Unhide our custom button
+    });
+
+    // Handle user clicking our custom install button
+    if (btnInstall) {
+      btnInstall.addEventListener('click', async () => {
+        if (deferredPrompt) {
+          deferredPrompt.prompt(); // Show the native install prompt
+          const { outcome } = await deferredPrompt.userChoice;
+          console.log(`User installation choice: ${outcome}`);
+          deferredPrompt = null; // Clear it out
+          btnInstall.style.display = 'none'; // Hide button after choice
+        }
+      });
+    }
+
+    // If installed successfully (or already installed), hide the button permanently
+    window.addEventListener('appinstalled', () => {
+      deferredPrompt = null;
+      if (btnInstall) btnInstall.style.display = 'none';
+      console.log('PWA has been installed successfully');
+    });
+
+    // --- 3. Offline Service Worker Registration ---
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js')
+        .then(() => console.log('Service Worker Cached Offline'))
+        .catch((err) => console.log('SW Registration failed: ', err));
+    }
+
+    // --- 4. Boot App State ---
     if (window.location.hash.startsWith('#join=')) {
       const payloadStr = Utils.decodeBase64Url(window.location.hash.substring(6));
       window.history.replaceState(null, '', window.location.pathname);
@@ -246,7 +284,6 @@ const App = {
     const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; 
     qrWrap.appendChild(qrDiv);
 
-    // Only render carousel controls if there are multiple chunks
     if(chunks.length > 1) {
       const navWrap = Utils.createElement('div', '', 'qr-carousel');
       const btnPrev = Utils.createElement('button', '❮', 'secondary qr-nav-btn');
@@ -535,12 +572,3 @@ const App = {
 };
 
 window.onload = App.init;
-
-// --- PWA Service Worker Registration ---
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js')
-      .then((registration) => console.log('PWA Ready & Cached Offline'))
-      .catch((err) => console.log('SW Registration failed: ', err));
-  });
-}
