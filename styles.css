@@ -45,7 +45,9 @@ body {
 .icon-btn { background: none; border: none; color: var(--text-main); padding: 5px; cursor: pointer; box-shadow: none; width: auto; margin:0;}
 
 #app-container { flex: 1; width: 100%; max-width: 600px; margin: 0 auto; display: flex; flex-direction: column; padding: 20px; overflow-y: auto; padding-bottom: calc(20px + var(--safe-bottom)); }
-.view { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); width: 100%; }
+
+/* FIX: margin: auto 0 allows flexbox to center elements if there's space, but SCROLL safely if they are too big */
+.view { display: flex; flex-direction: column; align-items: center; width: 100%; margin: auto 0; padding: 10px 0; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
 @keyframes slideUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
 
 .card { background: var(--bg-card); padding: 24px; border-radius: var(--radius); width: 100%; box-shadow: 0 4px 25px rgba(0,0,0,0.03); text-align: center; border: 1px solid var(--border); overflow: hidden; display: flex; flex-direction: column;}
@@ -77,7 +79,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .settings-card { background: var(--bg-card); padding: 24px; border-radius: var(--radius); width: 100%; max-width: 400px; border: 1px solid var(--border); }
 .setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-weight: 500;}
 
-.switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+/* FIX: flex-shrink: 0 prevents the toggle switch from squishing past its shape */
+.switch { position: relative; display: inline-block; width: 50px; height: 28px; flex-shrink: 0; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border); transition: .3s; border-radius: 34px; }
 .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .3s; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2);}
@@ -99,9 +102,8 @@ input:checked + .slider:before { transform: translateX(22px); background-color: 
 .qr-status { font-weight: 700; font-size: 0.95rem; color: var(--text-main);}
 .scan-instruction { font-size: 0.95rem; font-weight: 800; color: var(--primary); margin: 10px 0; text-align: center; background: var(--msg-host); padding: 8px; border-radius: 8px;}
 
-/* FIX: Flawless Camera CSS (No Squishing) */
 #reader-container { width: 100%; min-height: 280px; overflow: hidden; border-radius: 12px; background: #000; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 12px;}
-#reader-container video { object-fit: cover; border-radius: 12px; }
+#reader-container video { width: 100% !important; height: auto !important; display: block; object-fit: cover; }
 
 #chat-header-bar { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 15px; }
 #chat-header-bar h3 { font-size: 1.1rem; }
