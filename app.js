@@ -1,4 +1,4 @@
-// app.js - App State, Cloud OTP, Chat UI, Multi-QR & Camera Selector
+// app.js - App State, Cloud OTP, Chat UI, Multi-QR (6 Parts) & Camera Selector
 
 const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3dP8CzVtTl1JCrNyibhOypH5lKyB7adpK6pBMUjk69WKruStFLbpwQ/exec"; 
 
@@ -6,7 +6,7 @@ const STATE = { IDLE: 'IDLE', CONNECTING: 'CONNECTING', CONNECTED: 'CONNECTED', 
 let currentState = STATE.IDLE;
 let connection = null;
 let incomingFiles = {};
-let html5QrCode = null; // Global Scanner Instance
+let html5QrCode = null; 
 
 const animHTML = `
   <div class="link-animation">
@@ -16,12 +16,13 @@ const animHTML = `
   </div>
 `;
 
-// Helper: Split massive payload into small Scannable QRs
-const QR_CHUNK_SIZE = 600; 
+// FIX: Dynamic Splitter into exactly 6 easily scannable chunks
 function createQRChunks(base64) {
   const chunks = [];
-  for(let i=0; i<base64.length; i+=QR_CHUNK_SIZE) {
-    chunks.push(base64.substring(i, i+QR_CHUNK_SIZE));
+  const TOTAL_CHUNKS = 6;
+  const chunkSize = Math.ceil(base64.length / TOTAL_CHUNKS);
+  for(let i = 0; i < base64.length; i += chunkSize) {
+    chunks.push(base64.substring(i, i + chunkSize));
   }
   return chunks.map((c, i) => `WCT:${i+1}/${chunks.length}:${c}`);
 }
@@ -63,7 +64,6 @@ const App = {
     }
   },
 
-  // FIX: Background camera shutdown to prevent Race Conditions
   async stopScannerSafely() {
     if (html5QrCode) {
       try { await html5QrCode.stop(); } catch(e) {}
@@ -74,11 +74,10 @@ const App = {
     if (rc) { rc.style.display = 'none'; rc.innerHTML = ''; }
   },
 
-  // FIX: Synchronous DOM clearing!
   setState(newState) { 
     currentState = newState; 
-    App.container.innerHTML = ''; // Wipe screen INSTANTLY
-    App.stopScannerSafely(); // Shut down camera in the background
+    App.container.innerHTML = ''; 
+    App.stopScannerSafely(); 
   },
 
   renderIdle() {
@@ -109,7 +108,6 @@ const App = {
     view.appendChild(card); App.container.appendChild(view);
   },
 
-  // --- UNIVERSAL MULTI-PART SCANNER & CAMERA SELECTOR ---
   renderScannerUI(expectedType, onSuccess) {
     App.setState(STATE.CONNECTING);
     const view = Utils.createElement('div', '', 'view');
@@ -163,9 +161,10 @@ const App = {
        readerWrapper.style.display = 'block';
        html5QrCode = new Html5Qrcode("reader-container");
        try {
+          // FIX: aspectRatio: 1.0 forces a square bounding box, preventing squished laptop feeds.
           await html5QrCode.start(
             deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" }, 
-            { fps: 10, qrbox: { width: 250, height: 250 } }, 
+            { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1.0 }, 
             handleScan
           );
        } catch(e) { alert("Camera failed to start."); }
@@ -226,7 +225,6 @@ const App = {
     view.appendChild(card); App.container.appendChild(view);
   },
 
-  // --- MULTI-QR CAROUSEL GENERATOR ---
   renderQRCarousel(container, base64Payload) {
     const chunks = createQRChunks(base64Payload);
     let currentIndex = 0;
@@ -257,8 +255,6 @@ const App = {
     
     setTimeout(updateQR, 100);
   },
-
-  // ================= ROOM LOGIC =================
 
   async hostCloudRoom(pin) {
     App.setState(STATE.CONNECTING);
@@ -361,8 +357,6 @@ const App = {
       } catch(e) { App.renderError("Invalid offer."); }
     }, 100);
   },
-
-  // ================= CHAT UI =================
 
   renderChat() {
     App.setState(STATE.CONNECTED);
