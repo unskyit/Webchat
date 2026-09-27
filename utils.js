@@ -18,7 +18,8 @@ const Utils = {
   // Base64URL Decoding
   decodeBase64Url: (base64Url) => {
     try {
-      let base64 = base64Url.replace/-/g, '+').replace(/_/g, '/');
+      // FIXED: Added the missing '(' before /-/g
+      let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
       while (base64.length % 4) base64 += '=';
       const binaryString = atob(base64);
       const bytes = new Uint8Array(binaryString.length);
