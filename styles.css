@@ -99,9 +99,9 @@ input:checked + .slider:before { transform: translateX(22px); background-color: 
 .qr-status { font-weight: 700; font-size: 0.95rem; color: var(--text-main);}
 .scan-instruction { font-size: 0.95rem; font-weight: 800; color: var(--primary); margin: 10px 0; text-align: center; background: var(--msg-host); padding: 8px; border-radius: 8px;}
 
-/* FIX: Forces the video feed to respect the square aspect ratio without squishing */
-#reader-container { width: 100%; overflow: hidden; border-radius: 12px; background: #000; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 12px;}
-#reader-container video { width: 100% !important; height: auto !important; display: block; object-fit: cover; }
+/* FIX: Flawless Camera CSS (No Squishing) */
+#reader-container { width: 100%; min-height: 280px; overflow: hidden; border-radius: 12px; background: #000; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 12px;}
+#reader-container video { object-fit: cover; border-radius: 12px; }
 
 #chat-header-bar { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 15px; }
 #chat-header-bar h3 { font-size: 1.1rem; }
