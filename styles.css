@@ -37,10 +37,11 @@ body {
 }
 
 .brand { color: var(--primary); font-weight: 800; }
+.brand-sub { font-size: 0.75rem; font-weight: 600; color: var(--text-sub); margin-top: -3px; letter-spacing: 0.5px;}
 
 .app-header { background: var(--bg-card); padding: calc(15px + var(--safe-top)) 20px 15px; border-bottom: 1px solid var(--border); }
 .header-content { display: flex; justify-content: space-between; align-items: center; max-width: 600px; margin: 0 auto; width: 100%; }
-.app-header h2 { font-size: 1.3rem; letter-spacing: -0.03em; }
+.app-header h2 { font-size: 1.4rem; letter-spacing: -0.03em; margin: 0;}
 .icon-btn { background: none; border: none; color: var(--text-main); padding: 5px; cursor: pointer; box-shadow: none; width: auto; margin:0;}
 
 #app-container { flex: 1; width: 100%; max-width: 600px; margin: 0 auto; display: flex; flex-direction: column; padding: 20px; overflow-y: auto; padding-bottom: calc(20px + var(--safe-bottom)); }
@@ -62,11 +63,14 @@ input.otp-input { text-align: center; font-size: 1.6rem; font-weight: 800; lette
 button {
   background-color: var(--primary); color: #ffffff; border: none; border-radius: 12px;
   padding: 16px; font-size: 1rem; font-weight: 600; cursor: pointer; width: 100%; margin-bottom: 12px;
-  transition: transform 0.1s;
+  transition: transform 0.1s, background-color 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;
 }
 button:active { transform: scale(0.98); }
 button.secondary { background-color: var(--bg-base); color: var(--text-main); border: 2px solid var(--border); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.scan-btn-group { display: flex; gap: 10px; width: 100%; margin-bottom: 16px;}
+.scan-btn-group button { margin-bottom: 0; padding: 12px;}
 
 #settings-overlay { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.4); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: center; z-index: 100; padding: 20px;}
 #settings-overlay.hidden { display: none; }
@@ -81,7 +85,6 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 input:checked + .slider { background-color: var(--primary); }
 input:checked + .slider:before { transform: translateX(22px); background-color: #ffffff; }
 
-/* --- Connecting Animation --- */
 .link-animation { display: flex; align-items: center; justify-content: center; gap: 15px; margin: 30px 0; }
 .orb { width: 18px; height: 18px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 15px var(--primary); animation: pulseOrb 1.5s infinite alternate; }
 .beam-container { width: 100px; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; position: relative;}
@@ -89,27 +92,14 @@ input:checked + .slider:before { transform: translateX(22px); background-color: 
 @keyframes pulseOrb { 0% { transform: scale(0.8); opacity: 0.6; } 100% { transform: scale(1.2); opacity: 1; } }
 @keyframes shootBeam { 0% { left: -50px; } 100% { left: 100px; } }
 
-/* --- FIX: Flawless QR Code Render --- */
 #qrcode { 
-  background: #ffffff !important; /* Force white for scanner contrast */
-  padding: 16px; /* CRITICAL: The Quiet Zone border */
-  border-radius: 12px; 
-  display: flex; 
-  justify-content: center;
-  align-items: center;
-  margin: 0 auto 24px auto;
-  width: fit-content;
-  max-width: 100%; 
-  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-  box-sizing: border-box;
+  background: #ffffff !important; padding: 16px; border-radius: 12px; 
+  display: flex; justify-content: center; align-items: center;
+  margin: 0 auto 24px auto; width: fit-content; max-width: 100%; 
+  box-shadow: 0 4px 15px rgba(0,0,0,0.05); box-sizing: border-box;
 }
-#qrcode canvas, #qrcode img {
-  max-width: 100% !important;
-  height: auto !important; /* Prevents chopping on small screens */
-  display: block;
-}
+#qrcode canvas, #qrcode img { max-width: 100% !important; height: auto !important; display: block; }
 
-/* --- Chat UI --- */
 #chat-header-bar { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 15px; }
 #chat-header-bar h3 { font-size: 1.1rem; }
 #btn-end { width: auto; margin: 0; padding: 8px 16px; font-size: 0.85rem; background: transparent; color: #ef4444; border: 2px solid #fee2e2; }
