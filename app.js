@@ -1,4 +1,4 @@
-// app.js - App State, Settings, Cloud OTP, and Chat UI
+// app.js - App State, Settings, Cloud OTP, Chat UI, and QR Processing
 
 const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3dP8CzVtTl1JCrNyibhOypH5lKyB7adpK6pBMUjk69WKruStFLbpwQ/exec"; 
 
@@ -6,6 +6,7 @@ const STATE = { IDLE: 'IDLE', CONNECTING: 'CONNECTING', CONNECTED: 'CONNECTED', 
 let currentState = STATE.IDLE;
 let connection = null;
 let incomingFiles = {};
+let html5QrCode = null; // Scanner instance
 
 const animHTML = `
   <div class="link-animation">
@@ -14,6 +15,12 @@ const animHTML = `
     <div class="orb"></div>
   </div>
 `;
+
+// Helper to extract base64 from a scanned URL or raw string
+function extractCode(text) {
+  if (text.includes('#join=')) return text.split('#join=')[1];
+  return text.trim();
+}
 
 const App = {
   container: document.getElementById('app-container'),
@@ -47,14 +54,18 @@ const App = {
     }
   },
 
-  setState(newState) { currentState = newState; App.container.innerHTML = ''; },
+  setState(newState) { 
+    currentState = newState; 
+    App.container.innerHTML = ''; 
+    if(html5QrCode) { html5QrCode.stop().catch(()=>{}); html5QrCode = null; }
+    document.getElementById('reader-container').style.display = 'none';
+  },
 
   renderIdle() {
     App.setState(STATE.IDLE);
     const view = Utils.createElement('div', '', 'view');
     const card = Utils.createElement('div', '', 'card');
-    card.appendChild(Utils.createElement('h1', 'New Session'));
-    card.appendChild(Utils.createElement('p', App.settings.useCloud ? 'Enter a custom PIN to create or join.' : 'Create a room or scan a code.'));
+    card.innerHTML = `<h1 class="brand">New Session</h1><p>${App.settings.useCloud ? 'Enter a custom PIN to create or join.' : 'Create a room or join one offline.'}</p>`;
 
     if (App.settings.useCloud) {
       const inputOTP = Utils.createElement('input', '', 'otp-input');
@@ -67,17 +78,73 @@ const App = {
     } else {
       const btnHost = Utils.createElement('button', 'Create Offline Room');
       btnHost.onclick = () => App.hostManualRoom();
-      const btnJoin = Utils.createElement('button', 'Paste Connection Code', 'secondary');
-      btnJoin.onclick = () => {
-        const code = prompt("Paste code here:");
-        if (code) {
-          const sig = Protocol.validateSignal(Utils.decodeBase64Url(code), 'offer');
-          if (sig) App.handleManualJoin(sig);
-          else alert("Invalid code.");
-        }
-      };
+      
+      const btnJoin = Utils.createElement('button', 'Join Offline Room', 'secondary');
+      btnJoin.onclick = () => App.renderScannerUI('offer', (decoded) => {
+        const sig = Protocol.validateSignal(Utils.decodeBase64Url(decoded), 'offer');
+        if (sig) App.handleManualJoin(sig); else alert("Invalid code.");
+      });
+
       card.appendChild(btnHost); card.appendChild(btnJoin);
     }
+    view.appendChild(card); App.container.appendChild(view);
+  },
+
+  // --- NEW: Universal Scanner UI Component ---
+  renderScannerUI(expectedType, onSuccess) {
+    App.setState(STATE.CONNECTING);
+    const view = Utils.createElement('div', '', 'view');
+    const card = Utils.createElement('div', '', 'card');
+    card.innerHTML = `<h1 class="brand">Provide Code</h1><p>Paste the text code, or scan a QR.</p>`;
+
+    const inputArea = Utils.createElement('textarea');
+    inputArea.placeholder = "Paste code here...";
+    inputArea.rows = 3;
+
+    const btnSubmit = Utils.createElement('button', 'Submit Code');
+    btnSubmit.onclick = () => { if(inputArea.value.trim()) onSuccess(extractCode(inputArea.value)); };
+
+    const btnGroup = Utils.createElement('div', '', 'scan-btn-group');
+    
+    // Camera Scan
+    const btnCam = Utils.createElement('button', '📸 Scan', 'secondary');
+    btnCam.onclick = () => {
+      const readerDiv = document.getElementById('reader-container');
+      readerDiv.style.display = 'block';
+      html5QrCode = new Html5Qrcode("reader-container");
+      // Environment preferred (mobile back), falls back to User (laptop front)
+      html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, (text) => {
+        html5QrCode.stop(); readerDiv.style.display = 'none';
+        onSuccess(extractCode(text));
+      }).catch(err => {
+        html5QrCode.start({ facingMode: "user" }, { fps: 10, qrbox: { width: 250, height: 250 } }, (text) => {
+          html5QrCode.stop(); readerDiv.style.display = 'none';
+          onSuccess(extractCode(text));
+        });
+      });
+    };
+
+    // File Upload Scan (No Permissions)
+    const fileIn = Utils.createElement('input'); fileIn.type = 'file'; fileIn.accept = 'image/*'; fileIn.style.display = 'none';
+    const btnFile = Utils.createElement('button', '🖼️ Upload QR', 'secondary');
+    btnFile.onclick = () => fileIn.click();
+    fileIn.onchange = (e) => {
+      if(!e.target.files.length) return;
+      html5QrCode = new Html5Qrcode("reader-container");
+      html5QrCode.scanFile(e.target.files[0], true)
+        .then(text => onSuccess(extractCode(text)))
+        .catch(err => alert("No QR code found in this image."));
+    };
+
+    btnGroup.appendChild(btnCam); btnGroup.appendChild(btnFile); btnGroup.appendChild(fileIn);
+    
+    card.appendChild(inputArea); card.appendChild(btnSubmit); card.appendChild(btnGroup);
+    
+    const btnBack = Utils.createElement('button', 'Cancel', 'secondary');
+    btnBack.style.marginTop = '10px';
+    btnBack.onclick = () => App.renderIdle();
+    card.appendChild(btnBack);
+
     view.appendChild(card); App.container.appendChild(view);
   },
 
@@ -138,32 +205,32 @@ const App = {
         const base64 = Utils.encodeBase64Url(offerStr);
         const url = `${window.location.origin}${window.location.pathname}#join=${base64}`;
 
-        card.innerHTML = '<h1 class="brand">Offline Room</h1><p>Scan QR or copy code to join.</p>';
+        card.innerHTML = '<h1 class="brand">Offline Room</h1><p>Step 1: Share this QR or Code</p>';
         const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; card.appendChild(qrDiv);
-        
-        // FIX: Increased to 320x320. Massive matrices need a larger physical render to be legible by cameras.
         new QRCode(qrDiv, { text: url, width: 320, height: 320, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
 
         setTimeout(() => {
-          const canvas = document.querySelector('#qrcode canvas');
-          if (canvas) {
-            const btnDl = Utils.createElement('button', '💾 Save QR Image', 'secondary');
-            btnDl.onclick = () => { const link = document.createElement('a'); link.download = 'Webchat-Room.png'; link.href = canvas.toDataURL("image/png"); link.click(); };
-            card.appendChild(btnDl);
-          }
-          const btnCopy = Utils.createElement('button', 'Copy Text Code', 'secondary');
-          btnCopy.onclick = () => { navigator.clipboard.writeText(base64); btnCopy.textContent = "Copied!"; setTimeout(() => btnCopy.textContent = "Copy Text Code", 2000); };
-          card.appendChild(btnCopy);
+          const btnGroup = Utils.createElement('div', '', 'scan-btn-group');
+          
+          const btnDl = Utils.createElement('button', '💾 Save QR', 'secondary');
+          btnDl.onclick = () => { const canvas = document.querySelector('#qrcode canvas'); if(canvas){ const a = document.createElement('a'); a.download = 'Webchat-Room.png'; a.href = canvas.toDataURL(); a.click(); }};
+          
+          const btnCopy = Utils.createElement('button', '📋 Copy Text', 'secondary');
+          btnCopy.onclick = () => { navigator.clipboard.writeText(base64); btnCopy.textContent = "Copied!"; setTimeout(() => btnCopy.textContent = "📋 Copy Text", 2000); };
+          
+          btnGroup.appendChild(btnDl); btnGroup.appendChild(btnCopy);
+          card.appendChild(btnGroup);
 
-          const inputAnswer = Utils.createElement('input'); inputAnswer.placeholder = "Paste friend's answer here...";
-          inputAnswer.oninput = async (e) => {
-            const dec = Utils.decodeBase64Url(e.target.value.trim());
-            if(dec) {
-              const ans = Protocol.validateSignal(dec, 'answer');
-              if(ans) { inputAnswer.value = 'Connecting...'; inputAnswer.disabled = true; connection.acceptAnswer(ans); }
-            }
-          };
-          card.appendChild(inputAnswer);
+          card.appendChild(Utils.createElement('p', 'Step 2: Receive their Answer'));
+          
+          const btnScanAns = Utils.createElement('button', 'Provide Answer Code');
+          btnScanAns.onclick = () => App.renderScannerUI('answer', (decoded) => {
+             const ans = Protocol.validateSignal(Utils.decodeBase64Url(decoded), 'answer');
+             if(ans) { App.setState(STATE.CONNECTING); connection.acceptAnswer(ans); }
+             else { alert("Invalid answer code."); App.hostManualRoom(); } // reload view safely
+          });
+          card.appendChild(btnScanAns);
+
         }, 300);
       } catch(e) { App.renderError("Network error."); }
     }, 100);
@@ -171,19 +238,41 @@ const App = {
 
   async handleManualJoin(offerSignal) {
     App.setState(STATE.CONNECTING);
-    connection = new P2PConnection(App.onConnectionStateChange, App.onMessageRouter);
-    try {
-      const ansStr = await connection.acceptOfferAndGenerateAnswer(offerSignal);
-      const base64 = Utils.encodeBase64Url(ansStr);
-      const view = Utils.createElement('div', '', 'view');
-      const card = Utils.createElement('div', '', 'card');
-      card.innerHTML = '<h1 class="brand">Send Answer</h1><p>Copy this and send to Host:</p>';
-      const txt = Utils.createElement('textarea'); txt.value = base64; txt.readOnly = true; txt.rows = 4;
-      card.appendChild(txt);
-      const btnCopy = Utils.createElement('button', 'Copy Answer');
-      btnCopy.onclick = () => { navigator.clipboard.writeText(base64); btnCopy.textContent = "Copied!"; };
-      card.appendChild(btnCopy); view.appendChild(card); App.container.appendChild(view);
-    } catch(e) { App.renderError("Invalid offer."); }
+    const view = Utils.createElement('div', '', 'view');
+    const card = Utils.createElement('div', '', 'card');
+    card.innerHTML = `<h1>Generating...</h1><p>Securing response keys (please wait)...</p>${animHTML}`;
+    view.appendChild(card); App.container.appendChild(view);
+
+    setTimeout(async () => {
+      connection = new P2PConnection(App.onConnectionStateChange, App.onMessageRouter);
+      try {
+        const ansStr = await connection.acceptOfferAndGenerateAnswer(offerSignal);
+        const base64 = Utils.encodeBase64Url(ansStr);
+        
+        card.innerHTML = '<h1 class="brand">Send Answer</h1><p>Share this back to the Host:</p>';
+        
+        // NEW: Generate QR for the Guest's Answer!
+        const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; card.appendChild(qrDiv);
+        new QRCode(qrDiv, { text: base64, width: 320, height: 320, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
+
+        setTimeout(() => {
+          const btnGroup = Utils.createElement('div', '', 'scan-btn-group');
+          
+          const btnDl = Utils.createElement('button', '💾 Save QR', 'secondary');
+          btnDl.onclick = () => { const canvas = document.querySelector('#qrcode canvas'); if(canvas){ const a = document.createElement('a'); a.download = 'Webchat-Answer.png'; a.href = canvas.toDataURL(); a.click(); }};
+          
+          const btnCopy = Utils.createElement('button', '📋 Copy Text', 'secondary');
+          btnCopy.onclick = () => { navigator.clipboard.writeText(base64); btnCopy.textContent = "Copied!"; setTimeout(() => btnCopy.textContent = "📋 Copy Text", 2000); };
+          
+          btnGroup.appendChild(btnDl); btnGroup.appendChild(btnCopy);
+          card.appendChild(btnGroup);
+          
+          const txt = Utils.createElement('textarea'); txt.value = base64; txt.readOnly = true; txt.rows = 2;
+          card.appendChild(txt);
+          
+        }, 300);
+      } catch(e) { App.renderError("Invalid offer."); }
+    }, 100);
   },
 
   renderChat() {
