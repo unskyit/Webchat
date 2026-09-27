@@ -5,11 +5,8 @@ const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3
 const STATE = { IDLE: 'IDLE', CONNECTING: 'CONNECTING', CONNECTED: 'CONNECTED', ERROR: 'ERROR' };
 let currentState = STATE.IDLE;
 let connection = null;
-
-// FIX: Robust tracking for incoming files
 let incomingFiles = {};
 
-// Captivating connection animation HTML
 const animHTML = `
   <div class="link-animation">
     <div class="orb"></div>
@@ -88,7 +85,6 @@ const App = {
     App.setState(STATE.CONNECTING);
     const view = Utils.createElement('div', '', 'view');
     const card = Utils.createElement('div', '', 'card');
-    // Injected the alive animation
     card.innerHTML = `<h1 class="brand">Room Created</h1><p>Tell your friend to enter PIN:</p><h2 class="otp-input">${pin}</h2>${animHTML}<p style="margin-top:10px; font-size:0.85rem;">Waiting for them to join... (Expires in 5m)</p>`;
     view.appendChild(card); App.container.appendChild(view);
     
@@ -144,7 +140,9 @@ const App = {
 
         card.innerHTML = '<h1 class="brand">Offline Room</h1><p>Scan QR or copy code to join.</p>';
         const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; card.appendChild(qrDiv);
-        new QRCode(qrDiv, { text: url, width: 200, height: 200, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
+        
+        // FIX: Increased to 320x320. Massive matrices need a larger physical render to be legible by cameras.
+        new QRCode(qrDiv, { text: url, width: 320, height: 320, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
 
         setTimeout(() => {
           const canvas = document.querySelector('#qrcode canvas');
@@ -205,7 +203,6 @@ const App = {
 
     const inputContainer = Utils.createElement('div'); inputContainer.id = 'chat-input-container';
     
-    // FIX: Lock queue to prevent overlapping files
     const fileInput = Utils.createElement('input'); fileInput.type = 'file'; fileInput.style.display = 'none';
     let isSendingFile = false;
 
@@ -262,7 +259,6 @@ const App = {
     else if (msg.type === 'file_end') {
       const activeFile = incomingFiles[msg.id];
       if (activeFile) {
-         // Fix: Enforces exact file type to avoid .txt fallbacks
          const blob = new Blob(activeFile.chunks, { type: activeFile.mimeType || 'application/octet-stream' }); 
          const url = URL.createObjectURL(blob);
          App.completeFileBox(msg.id, url, activeFile.name);
@@ -287,7 +283,6 @@ const App = {
     log.appendChild(msgEl); log.scrollTop = log.scrollHeight;
   },
 
-  // FIX: Added smooth progress bar HTML
   appendFileBox(name, size, id, isUpload) {
     const log = document.getElementById('chat-log');
     const wrap = Utils.createElement('div', '', 'msg-wrap ' + (isUpload ? 'self' : 'peer'));
@@ -305,7 +300,6 @@ const App = {
     log.appendChild(wrap); log.scrollTop = log.scrollHeight;
   },
 
-  // FIX: Exact percentage rounded down for smooth visual bar
   updateFileBox(id, percent) {
     const text = document.getElementById('fileprog-text-' + id);
     const bar = document.getElementById('fileprog-bar-' + id);
@@ -314,7 +308,6 @@ const App = {
     if (bar) bar.style.width = `${p}%`;
   },
 
-  // FIX: Accurate saving using exact filename
   completeFileBox(id, url, filename) {
     const text = document.getElementById('fileprog-text-' + id);
     const bar = document.getElementById('fileprog-bar-' + id);
