@@ -1,4 +1,4 @@
-// app.js - App State, Cloud OTP, Chat UI, Multi-QR (6 Parts) & Camera Selector
+// app.js - App State, Cloud OTP, Chat UI, Multi-QR (6 Parts) & Dynamic Camera
 
 const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3dP8CzVtTl1JCrNyibhOypH5lKyB7adpK6pBMUjk69WKruStFLbpwQ/exec"; 
 
@@ -16,7 +16,6 @@ const animHTML = `
   </div>
 `;
 
-// FIX: Dynamic Splitter into exactly 6 easily scannable chunks
 function createQRChunks(base64) {
   const chunks = [];
   const TOTAL_CHUNKS = 6;
@@ -161,10 +160,13 @@ const App = {
        readerWrapper.style.display = 'block';
        html5QrCode = new Html5Qrcode("reader-container");
        try {
-          // FIX: aspectRatio: 1.0 forces a square bounding box, preventing squished laptop feeds.
+          // FIX: Dynamic qrbox prevents squishing on weird aspect ratios
           await html5QrCode.start(
             deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" }, 
-            { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1.0 }, 
+            { 
+              fps: 10, 
+              qrbox: function(vw, vh) { return { width: Math.min(vw, vh) * 0.8, height: Math.min(vw, vh) * 0.8 }; }
+            }, 
             handleScan
           );
        } catch(e) { alert("Camera failed to start."); }
