@@ -34,6 +34,11 @@
     <div class="settings-card">
       <h3 style="margin-bottom: 20px;">Settings</h3>
       
+      <!-- NEW: Install PWA Button (Hidden by default) -->
+      <button id="btn-install-pwa" style="display: none; background-color: #10b981; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);">
+        📲 Install App to Home Screen
+      </button>
+
       <div class="setting-row">
         <span>Dark Mode</span>
         <label class="switch"><input type="checkbox" id="toggle-theme"><span class="slider"></span></label>
@@ -61,7 +66,6 @@
       <button id="btn-close-settings" class="secondary" style="margin-top: 10px;">Close</button>
     </div>
   </div>
-
   <main id="app-container"></main>
 
   <script src="qrcode.min.js"></script>
