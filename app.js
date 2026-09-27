@@ -1,4 +1,4 @@
-// app.js - App State, Settings, Cloud OTP, Chat UI, and QR Processing
+// app.js - App State, Cloud OTP, Chat UI, Multi-QR & Camera Selector
 
 const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3dP8CzVtTl1JCrNyibhOypH5lKyB7adpK6pBMUjk69WKruStFLbpwQ/exec"; 
 
@@ -6,7 +6,7 @@ const STATE = { IDLE: 'IDLE', CONNECTING: 'CONNECTING', CONNECTED: 'CONNECTED', 
 let currentState = STATE.IDLE;
 let connection = null;
 let incomingFiles = {};
-let html5QrCode = null; // Scanner instance
+let html5QrCode = null; // Global Scanner Instance
 
 const animHTML = `
   <div class="link-animation">
@@ -16,7 +16,16 @@ const animHTML = `
   </div>
 `;
 
-// Helper to extract base64 from a scanned URL or raw string
+// Helper: Split massive payload into small Scannable QRs
+const QR_CHUNK_SIZE = 600; 
+function createQRChunks(base64) {
+  const chunks = [];
+  for(let i=0; i<base64.length; i+=QR_CHUNK_SIZE) {
+    chunks.push(base64.substring(i, i+QR_CHUNK_SIZE));
+  }
+  return chunks.map((c, i) => `WCT:${i+1}/${chunks.length}:${c}`);
+}
+
 function extractCode(text) {
   if (text.includes('#join=')) return text.split('#join=')[1];
   return text.trim();
@@ -54,11 +63,20 @@ const App = {
     }
   },
 
-  setState(newState) { 
+  async stopScannerSafely() {
+    if (html5QrCode) {
+      try { await html5QrCode.stop(); } catch(e) {}
+      html5QrCode.clear();
+      html5QrCode = null;
+    }
+    const rc = document.getElementById('reader-container');
+    if (rc) { rc.style.display = 'none'; rc.innerHTML = ''; }
+  },
+
+  async setState(newState) { 
     currentState = newState; 
+    await App.stopScannerSafely();
     App.container.innerHTML = ''; 
-    if(html5QrCode) { html5QrCode.stop().catch(()=>{}); html5QrCode = null; }
-    document.getElementById('reader-container').style.display = 'none';
   },
 
   renderIdle() {
@@ -78,75 +96,171 @@ const App = {
     } else {
       const btnHost = Utils.createElement('button', 'Create Offline Room');
       btnHost.onclick = () => App.hostManualRoom();
-      
       const btnJoin = Utils.createElement('button', 'Join Offline Room', 'secondary');
       btnJoin.onclick = () => App.renderScannerUI('offer', (decoded) => {
         const sig = Protocol.validateSignal(Utils.decodeBase64Url(decoded), 'offer');
-        if (sig) App.handleManualJoin(sig); else alert("Invalid code.");
+        if (sig) App.handleManualJoin(sig); 
+        else { alert("Invalid Offer Code."); App.renderIdle(); } // Fixed Blank Screen Crash
       });
-
       card.appendChild(btnHost); card.appendChild(btnJoin);
     }
     view.appendChild(card); App.container.appendChild(view);
   },
 
-  // --- NEW: Universal Scanner UI Component ---
-  renderScannerUI(expectedType, onSuccess) {
-    App.setState(STATE.CONNECTING);
+  // --- UNIVERSAL MULTI-PART SCANNER & CAMERA SELECTOR ---
+  async renderScannerUI(expectedType, onSuccess) {
+    await App.setState(STATE.CONNECTING);
     const view = Utils.createElement('div', '', 'view');
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = `<h1 class="brand">Provide Code</h1><p>Paste the text code, or scan a QR.</p>`;
+    card.innerHTML = `<h1 class="brand">Provide Code</h1><p>Paste the full text code, or scan the QR(s).</p>`;
 
-    const inputArea = Utils.createElement('textarea');
-    inputArea.placeholder = "Paste code here...";
-    inputArea.rows = 3;
+    const instruction = Utils.createElement('div', 'Scan QR Code 1', 'scan-instruction');
+    card.appendChild(instruction);
 
-    const btnSubmit = Utils.createElement('button', 'Submit Code');
-    btnSubmit.onclick = () => { if(inputArea.value.trim()) onSuccess(extractCode(inputArea.value)); };
+    const camSelect = Utils.createElement('select', '', 'cam-select');
+    camSelect.style.display = 'none';
+    card.appendChild(camSelect);
+
+    const readerWrapper = Utils.createElement('div');
+    readerWrapper.id = 'reader-container';
+    readerWrapper.style.display = 'none';
+    card.appendChild(readerWrapper);
 
     const btnGroup = Utils.createElement('div', '', 'scan-btn-group');
     
-    // Camera Scan
-    const btnCam = Utils.createElement('button', '📸 Scan', 'secondary');
-    btnCam.onclick = () => {
-      const readerDiv = document.getElementById('reader-container');
-      readerDiv.style.display = 'block';
-      html5QrCode = new Html5Qrcode("reader-container");
-      // Environment preferred (mobile back), falls back to User (laptop front)
-      html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, (text) => {
-        html5QrCode.stop(); readerDiv.style.display = 'none';
-        onSuccess(extractCode(text));
-      }).catch(err => {
-        html5QrCode.start({ facingMode: "user" }, { fps: 10, qrbox: { width: 250, height: 250 } }, (text) => {
-          html5QrCode.stop(); readerDiv.style.display = 'none';
+    let scannedParts = [];
+    let expectedParts = 0;
+
+    const handleScan = async (text) => {
+       if (text.startsWith('WCT:')) {
+          const parts = text.split(':');
+          if (parts.length >= 3) {
+             const info = parts[1].split('/');
+             const index = parseInt(info[0]) - 1;
+             expectedParts = parseInt(info[1]);
+             if (!scannedParts[index]) {
+                scannedParts[index] = parts.slice(2).join(':'); // The payload chunk
+             }
+             const scannedCount = scannedParts.filter(Boolean).length;
+             if (scannedCount === expectedParts) {
+                await App.stopScannerSafely();
+                instruction.textContent = "All parts scanned! Connecting...";
+                onSuccess(scannedParts.join(''));
+             } else {
+                instruction.textContent = `Scanned ${scannedCount} of ${expectedParts}. Scan another!`;
+             }
+          }
+       } else {
+          // Standard single QR fallback
+          await App.stopScannerSafely();
           onSuccess(extractCode(text));
-        });
-      });
+       }
     };
 
-    // File Upload Scan (No Permissions)
+    const startCamera = async (deviceId) => {
+       await App.stopScannerSafely();
+       readerWrapper.style.display = 'block';
+       html5QrCode = new Html5Qrcode("reader-container");
+       try {
+          await html5QrCode.start(
+            deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" }, 
+            { fps: 10, qrbox: { width: 250, height: 250 } }, 
+            handleScan
+          );
+       } catch(e) { alert("Camera failed to start."); }
+    };
+
+    const btnCam = Utils.createElement('button', '📸 Camera', 'secondary');
+    btnCam.onclick = async () => {
+      btnCam.disabled = true;
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+           camSelect.style.display = 'block';
+           camSelect.innerHTML = '';
+           devices.forEach(d => {
+              const opt = document.createElement('option');
+              opt.value = d.id; opt.text = d.label || `Camera ${camSelect.length + 1}`;
+              camSelect.appendChild(opt);
+           });
+           // Pick standard back camera by default
+           const mainCam = devices.find(d => d.label.toLowerCase().includes('back') && !d.label.toLowerCase().includes('wide'));
+           if(mainCam) camSelect.value = mainCam.id;
+           camSelect.onchange = () => startCamera(camSelect.value);
+           startCamera(camSelect.value);
+        } else { alert("No cameras found."); }
+      } catch(e) { alert("Camera permission denied."); }
+      btnCam.disabled = false;
+    };
+
     const fileIn = Utils.createElement('input'); fileIn.type = 'file'; fileIn.accept = 'image/*'; fileIn.style.display = 'none';
-    const btnFile = Utils.createElement('button', '🖼️ Upload QR', 'secondary');
+    const btnFile = Utils.createElement('button', '🖼️ Upload', 'secondary');
     btnFile.onclick = () => fileIn.click();
     fileIn.onchange = (e) => {
       if(!e.target.files.length) return;
-      html5QrCode = new Html5Qrcode("reader-container");
+      if(!html5QrCode) html5QrCode = new Html5Qrcode("reader-container");
       html5QrCode.scanFile(e.target.files[0], true)
-        .then(text => onSuccess(extractCode(text)))
-        .catch(err => alert("No QR code found in this image."));
+        .then(text => handleScan(text))
+        .catch(err => alert("No QR found in image."));
+      fileIn.value = '';
     };
 
     btnGroup.appendChild(btnCam); btnGroup.appendChild(btnFile); btnGroup.appendChild(fileIn);
-    
-    card.appendChild(inputArea); card.appendChild(btnSubmit); card.appendChild(btnGroup);
+    card.appendChild(btnGroup);
+
+    const inputArea = Utils.createElement('textarea'); inputArea.placeholder = "Or paste full text code here..."; inputArea.rows = 2;
+    const btnSubmit = Utils.createElement('button', 'Submit Code');
+    btnSubmit.onclick = async () => { 
+      if(inputArea.value.trim()) { 
+        await App.stopScannerSafely();
+        onSuccess(extractCode(inputArea.value)); 
+      } 
+    };
+
+    card.appendChild(inputArea); card.appendChild(btnSubmit);
     
     const btnBack = Utils.createElement('button', 'Cancel', 'secondary');
-    btnBack.style.marginTop = '10px';
-    btnBack.onclick = () => App.renderIdle();
+    btnBack.style.marginTop = '10px'; btnBack.onclick = () => App.renderIdle();
     card.appendChild(btnBack);
 
     view.appendChild(card); App.container.appendChild(view);
   },
+
+  // --- MULTI-QR CAROUSEL GENERATOR ---
+  renderQRCarousel(container, base64Payload) {
+    const chunks = createQRChunks(base64Payload);
+    let currentIndex = 0;
+
+    const qrWrap = Utils.createElement('div');
+    const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; 
+    qrWrap.appendChild(qrDiv);
+
+    const navWrap = Utils.createElement('div', '', 'qr-carousel');
+    const btnPrev = Utils.createElement('button', '❮', 'secondary qr-nav-btn');
+    const btnNext = Utils.createElement('button', '❯', 'secondary qr-nav-btn');
+    const lblStatus = Utils.createElement('span', `QR 1 of ${chunks.length}`, 'qr-status');
+    
+    navWrap.appendChild(btnPrev); navWrap.appendChild(lblStatus); navWrap.appendChild(btnNext);
+    if(chunks.length > 1) qrWrap.appendChild(navWrap);
+    container.appendChild(qrWrap);
+
+    let qrInstance = null;
+    const updateQR = () => {
+      qrDiv.innerHTML = '';
+      qrInstance = new QRCode(qrDiv, { text: chunks[currentIndex], width: 280, height: 280, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
+      lblStatus.textContent = `QR ${currentIndex + 1} of ${chunks.length}`;
+      btnPrev.disabled = currentIndex === 0;
+      btnNext.disabled = currentIndex === chunks.length - 1;
+    };
+    
+    btnPrev.onclick = () => { if(currentIndex > 0) { currentIndex--; updateQR(); }};
+    btnNext.onclick = () => { if(currentIndex < chunks.length - 1) { currentIndex++; updateQR(); }};
+    
+    setTimeout(updateQR, 100);
+  },
+
+
+  // ================= ROOM LOGIC =================
 
   async hostCloudRoom(pin) {
     App.setState(STATE.CONNECTING);
@@ -203,35 +317,24 @@ const App = {
       try {
         const offerStr = await connection.generateOffer();
         const base64 = Utils.encodeBase64Url(offerStr);
-        const url = `${window.location.origin}${window.location.pathname}#join=${base64}`;
-
         card.innerHTML = '<h1 class="brand">Offline Room</h1><p>Step 1: Share this QR or Code</p>';
-        const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; card.appendChild(qrDiv);
-        new QRCode(qrDiv, { text: url, width: 320, height: 320, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
+        
+        App.renderQRCarousel(card, base64); // Multi-QR Magic!
 
         setTimeout(() => {
-          const btnGroup = Utils.createElement('div', '', 'scan-btn-group');
-          
-          const btnDl = Utils.createElement('button', '💾 Save QR', 'secondary');
-          btnDl.onclick = () => { const canvas = document.querySelector('#qrcode canvas'); if(canvas){ const a = document.createElement('a'); a.download = 'Webchat-Room.png'; a.href = canvas.toDataURL(); a.click(); }};
-          
-          const btnCopy = Utils.createElement('button', '📋 Copy Text', 'secondary');
-          btnCopy.onclick = () => { navigator.clipboard.writeText(base64); btnCopy.textContent = "Copied!"; setTimeout(() => btnCopy.textContent = "📋 Copy Text", 2000); };
-          
-          btnGroup.appendChild(btnDl); btnGroup.appendChild(btnCopy);
-          card.appendChild(btnGroup);
+          const btnCopy = Utils.createElement('button', '📋 Copy Full Text Code', 'secondary');
+          btnCopy.onclick = () => { navigator.clipboard.writeText(base64); btnCopy.textContent = "Copied!"; setTimeout(() => btnCopy.textContent = "📋 Copy Full Text Code", 2000); };
+          card.appendChild(btnCopy);
 
           card.appendChild(Utils.createElement('p', 'Step 2: Receive their Answer'));
-          
           const btnScanAns = Utils.createElement('button', 'Provide Answer Code');
           btnScanAns.onclick = () => App.renderScannerUI('answer', (decoded) => {
              const ans = Protocol.validateSignal(Utils.decodeBase64Url(decoded), 'answer');
              if(ans) { App.setState(STATE.CONNECTING); connection.acceptAnswer(ans); }
-             else { alert("Invalid answer code."); App.hostManualRoom(); } // reload view safely
+             else { alert("Invalid Answer Code."); App.renderIdle(); } // Fixed Crash
           });
           card.appendChild(btnScanAns);
-
-        }, 300);
+        }, 200);
       } catch(e) { App.renderError("Network error."); }
     }, 100);
   },
@@ -248,32 +351,20 @@ const App = {
       try {
         const ansStr = await connection.acceptOfferAndGenerateAnswer(offerSignal);
         const base64 = Utils.encodeBase64Url(ansStr);
-        
         card.innerHTML = '<h1 class="brand">Send Answer</h1><p>Share this back to the Host:</p>';
         
-        // NEW: Generate QR for the Guest's Answer!
-        const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; card.appendChild(qrDiv);
-        new QRCode(qrDiv, { text: base64, width: 320, height: 320, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
+        App.renderQRCarousel(card, base64); // Multi-QR Magic!
 
         setTimeout(() => {
-          const btnGroup = Utils.createElement('div', '', 'scan-btn-group');
-          
-          const btnDl = Utils.createElement('button', '💾 Save QR', 'secondary');
-          btnDl.onclick = () => { const canvas = document.querySelector('#qrcode canvas'); if(canvas){ const a = document.createElement('a'); a.download = 'Webchat-Answer.png'; a.href = canvas.toDataURL(); a.click(); }};
-          
-          const btnCopy = Utils.createElement('button', '📋 Copy Text', 'secondary');
-          btnCopy.onclick = () => { navigator.clipboard.writeText(base64); btnCopy.textContent = "Copied!"; setTimeout(() => btnCopy.textContent = "📋 Copy Text", 2000); };
-          
-          btnGroup.appendChild(btnDl); btnGroup.appendChild(btnCopy);
-          card.appendChild(btnGroup);
-          
-          const txt = Utils.createElement('textarea'); txt.value = base64; txt.readOnly = true; txt.rows = 2;
-          card.appendChild(txt);
-          
-        }, 300);
+          const btnCopy = Utils.createElement('button', '📋 Copy Full Text Code', 'secondary');
+          btnCopy.onclick = () => { navigator.clipboard.writeText(base64); btnCopy.textContent = "Copied!"; setTimeout(() => btnCopy.textContent = "📋 Copy Full Text Code", 2000); };
+          card.appendChild(btnCopy);
+        }, 200);
       } catch(e) { App.renderError("Invalid offer."); }
     }, 100);
   },
+
+  // ================= CHAT UI =================
 
   renderChat() {
     App.setState(STATE.CONNECTED);
@@ -302,12 +393,7 @@ const App = {
       const fileId = 'upload-' + Utils.generateId();
       App.appendFileBox(f.name, f.size, fileId, true);
       
-      connection.sendFile(f, (prog) => {
-        App.updateFileBox(fileId, prog * 100);
-      }, () => {
-        App.completeFileBox(fileId, null, null);
-        isSendingFile = false;
-      });
+      connection.sendFile(f, (prog) => { App.updateFileBox(fileId, prog * 100); }, () => { App.completeFileBox(fileId, null, null); isSendingFile = false; });
       fileInput.value = '';
     };
 
@@ -408,9 +494,7 @@ const App = {
         a.href = url; a.download = filename; a.textContent = '💾 Save File'; 
         a.className = 'download-link';
         text.appendChild(a);
-      } else {
-        text.textContent = 'Sent ✅';
-      }
+      } else { text.textContent = 'Sent ✅'; }
     }
   },
 
@@ -421,9 +505,7 @@ const App = {
         App.appendSystemMessage(`⚠️ ${message} The room is now closed.`, 'disconnect');
         const inputCont = document.getElementById('chat-input-container');
         if (inputCont) { inputCont.style.opacity = '0.5'; inputCont.style.pointerEvents = 'none'; }
-      } else {
-        App.renderError(message || "Connection interrupted.");
-      }
+      } else { App.renderError(message || "Connection interrupted."); }
     }
   },
 
