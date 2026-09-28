@@ -1,9 +1,33 @@
-// app.js - UI Architecture, Ghost Typing, History Routing & App State
+// app.js - Full UI Architecture, Connection Engine, Ghost Typing & App State
 
 const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3dP8CzVtTl1JCrNyibhOypH5lKyB7adpK6pBMUjk69WKruStFLbpwQ/exec"; 
 let connection = null;
+let html5QrCode = null;
+let deferredPrompt = null;
 
-// Audio Synthesizer (Zero Dependency Feedback)
+const animHTML = `
+  <div class="link-animation">
+    <div class="orb"></div>
+    <div class="beam-container"><div class="beam"></div></div>
+    <div class="orb"></div>
+  </div>
+`;
+
+function createQRChunks(base64) {
+  const TOTAL_CHUNKS = App.settings.qrChunks;
+  const chunkSize = Math.ceil(base64.length / TOTAL_CHUNKS);
+  const chunks = [];
+  for(let i = 0; i < base64.length; i += chunkSize) chunks.push(base64.substring(i, i + chunkSize));
+  if (TOTAL_CHUNKS === 1) return [`WCT:1/1:${base64}`]; 
+  return chunks.map((c, i) => `WCT:${i+1}/${chunks.length}:${c}`);
+}
+
+function extractCode(text) {
+  if (text.includes('#join=')) return text.split('#join=')[1];
+  return text.trim();
+}
+
+// Zero Dependency Audio Synthesizer
 const Synthesizer = {
   ctx: null,
   init() { if(!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); },
@@ -11,8 +35,7 @@ const Synthesizer = {
     if(!this.ctx) return;
     const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
     osc.connect(gain); gain.connect(this.ctx.destination);
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(600, this.ctx.currentTime);
+    osc.type = 'sine'; osc.frequency.setValueAtTime(600, this.ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.1);
     gain.gain.setValueAtTime(0, this.ctx.currentTime);
     gain.gain.linearRampToValueAtTime(0.5, this.ctx.currentTime + 0.05);
@@ -23,8 +46,7 @@ const Synthesizer = {
     if(!this.ctx) return;
     const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
     osc.connect(gain); gain.connect(this.ctx.destination);
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(300, this.ctx.currentTime);
+    osc.type = 'triangle'; osc.frequency.setValueAtTime(300, this.ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.2);
     gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
@@ -40,13 +62,13 @@ const App = {
   activeIncomingFile: null,
 
   init() {
-    // History API Setup for Physical Back Button
+    // Physical Back Button Support via History API
     window.addEventListener('popstate', (e) => {
       if (e.state && e.state.view) App.renderState(e.state.view, false);
       else App.renderState('IDLE', false);
     });
 
-    // PWA & Settings Modals
+    // Modals & Settings Links
     document.getElementById('btn-settings').onclick = () => document.getElementById('settings-overlay').classList.remove('hidden');
     document.getElementById('btn-close-settings').onclick = () => document.getElementById('settings-overlay').classList.add('hidden');
     
@@ -54,8 +76,36 @@ const App = {
       App.settings.darkMode = e.target.checked;
       document.body.className = App.settings.darkMode ? 'dark-mode' : 'light-mode';
     };
-    document.getElementById('toggle-ghost').onchange = (e) => App.settings.ghostTyping = e.target.checked;
     
+    document.getElementById('toggle-mode').onchange = (e) => {
+      App.settings.useCloud = e.target.checked;
+      document.getElementById('mode-desc').textContent = App.settings.useCloud ? "Cloud OTP (Requires Internet)" : "Manual/QR (Works Offline)";
+      App.renderState('IDLE', true);
+    };
+
+    document.getElementById('toggle-ghost').onchange = (e) => App.settings.ghostTyping = e.target.checked;
+
+    const qrSlider = document.getElementById('qr-slider');
+    if (qrSlider) {
+      qrSlider.oninput = (e) => {
+        App.settings.qrChunks = parseInt(e.target.value);
+        document.getElementById('qr-slider-val').textContent = App.settings.qrChunks;
+      };
+    }
+
+    // PWA Install Logic
+    const btnInstall = document.getElementById('btn-install-pwa');
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault(); deferredPrompt = e; btnInstall.classList.remove('hidden');
+    });
+    btnInstall.addEventListener('click', async () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        await deferredPrompt.userChoice;
+        deferredPrompt = null; btnInstall.classList.add('hidden');
+      }
+    });
+
     // Total Data Persistence UI
     let savedUsage = JSON.parse(localStorage.getItem('wchat_data') || '{"up":0,"down":0}');
     document.getElementById('data-counter').textContent = `${(savedUsage.up/(1024*1024)).toFixed(2)} MB ⬆ | ${(savedUsage.down/(1024*1024)).toFixed(2)} MB ⬇`;
@@ -63,72 +113,208 @@ const App = {
     App.renderState('IDLE', true);
   },
 
+  async stopScannerSafely() {
+    if (html5QrCode) {
+      try { await html5QrCode.stop(); } catch(e) {}
+      try { html5QrCode.clear(); } catch(e) {}
+      html5QrCode = null;
+    }
+    const rc = document.getElementById('reader-container');
+    if (rc) { rc.style.display = 'none'; rc.innerHTML = ''; }
+  },
+
   renderState(state, pushHistory = true) {
     if (pushHistory) history.pushState({ view: state }, '', `#${state}`);
-    App.container.innerHTML = '';
+    App.container.innerHTML = ''; 
+    App.stopScannerSafely();
     
     if (state === 'IDLE') App.buildIdleView();
     else if (state === 'CONNECTED') App.buildChatView();
   },
 
-  onStateChange(status, msg) {
-    if (status === 'CONNECTED') {
-      Synthesizer.init(); // Init audio on human interaction
-      App.renderState('CONNECTED', true);
-      App.startHUD();
-    } else if (status === 'ERR_PEER_DISCONNECTED' || status === 'CLOSED') {
-      clearInterval(App.sessionTimer); clearInterval(App.metricsInterval);
-      document.getElementById('metrics-hud').classList.add('hidden');
-      alert(msg);
-      App.renderState('IDLE', true);
-    }
-  },
-
-  startHUD() {
-    document.getElementById('metrics-hud').classList.remove('hidden');
-    App.sessionStartTime = Date.now();
-    App.sessionTimer = setInterval(() => {
-      const secs = Math.floor((Date.now() - App.sessionStartTime) / 1000);
-      document.getElementById('session-timer').textContent = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
-    }, 1000);
-
-    App.metricsInterval = setInterval(() => {
-      if(!connection) return;
-      const current = connection.getMetrics();
-      const diffRx = current.rxBytes - App.lastMetrics.rxBytes;
-      const diffTx = current.txBytes - App.lastMetrics.txBytes;
-      const speed = (diffRx + diffTx) / (1024 * 1024); // MB/s
-      document.getElementById('transfer-speed').textContent = `${speed.toFixed(2)} MB/s`;
-      App.lastMetrics = { ...current };
-      
-      // Update Persistent Storage
-      let usage = JSON.parse(localStorage.getItem('wchat_data') || '{"up":0,"down":0}');
-      usage.up += diffTx; usage.down += diffRx;
-      localStorage.setItem('wchat_data', JSON.stringify(usage));
-      document.getElementById('data-counter').textContent = `${(usage.up/(1024*1024)).toFixed(2)} MB ⬆ | ${(usage.down/(1024*1024)).toFixed(2)} MB ⬇`;
-    }, 1000);
-  },
-
+  // -------------------------
+  // 1. CONNECTION UI LOGIC
+  // -------------------------
   buildIdleView() {
-    const view = Utils.createElement('div', '', 'view card');
-    view.innerHTML = `<h1 class="brand" style="margin-top:20px;">Secure Room</h1><p>Generate a secure room to begin.</p>`;
-    const btnHost = Utils.createElement('button', 'Create Network');
-    btnHost.onclick = () => { connection = new P2PConnection(App); connection.generateOffer().then(o => console.log(o)); /* Integrate QR/OTP flow here from v1 */ };
-    view.appendChild(btnHost);
-    App.container.appendChild(view);
+    const view = Utils.createElement('div', '', 'view');
+    const card = Utils.createElement('div', '', 'card');
+    card.innerHTML = `<h1 class="brand">New Session</h1><p>${App.settings.useCloud ? 'Enter a custom PIN to create or join.' : 'Create a room or join one offline.'}</p>`;
+
+    if (App.settings.useCloud) {
+      const inputOTP = Utils.createElement('input', '', 'otp-input');
+      inputOTP.placeholder = "e.g. secret45"; inputOTP.maxLength = 15;
+      const btnHost = Utils.createElement('button', 'Create with PIN');
+      btnHost.onclick = () => { if(inputOTP.value.trim()) App.hostCloudRoom(inputOTP.value.trim().toLowerCase()); };
+      const btnJoin = Utils.createElement('button', 'Join with PIN', 'secondary');
+      btnJoin.onclick = () => { if(inputOTP.value.trim()) App.joinCloudRoom(inputOTP.value.trim().toLowerCase()); };
+      card.appendChild(inputOTP); card.appendChild(btnHost); card.appendChild(btnJoin);
+    } else {
+      const btnHost = Utils.createElement('button', 'Create Offline Room');
+      btnHost.onclick = () => App.hostManualRoom();
+      const btnJoin = Utils.createElement('button', 'Join Offline Room', 'secondary');
+      btnJoin.onclick = () => App.renderScannerUI('offer', (decoded) => {
+        const sig = Protocol.validateSignal(Utils.decodeBase64Url(decoded), 'offer');
+        if (sig) App.handleManualJoin(sig); 
+        else { alert("Invalid Offer Code."); App.renderState('IDLE'); }
+      });
+      card.appendChild(btnHost); card.appendChild(btnJoin);
+    }
+    view.appendChild(card); App.container.appendChild(view);
   },
 
+  renderScannerUI(expectedType, onSuccess) {
+    const view = Utils.createElement('div', '', 'view');
+    const card = Utils.createElement('div', '', 'card');
+    card.innerHTML = `<h1 class="brand">Scan QR</h1><p>Point camera at the QR code(s).</p>`;
+    
+    const instruction = Utils.createElement('div', 'Scan QR Code 1', 'scan-instruction');
+    const readerWrapper = Utils.createElement('div'); readerWrapper.id = 'reader-container'; readerWrapper.style.display = 'none';
+    const btnGroup = Utils.createElement('div', '', 'scan-btn-group');
+    card.appendChild(instruction); card.appendChild(readerWrapper);
+
+    let scannedParts = []; let expectedParts = 0;
+    const handleScan = async (text) => {
+       if (text.startsWith('WCT:')) {
+          const parts = text.split(':');
+          if (parts.length >= 3) {
+             const info = parts[1].split('/');
+             const index = parseInt(info[0]) - 1; expectedParts = parseInt(info[1]);
+             if (!scannedParts[index]) scannedParts[index] = parts.slice(2).join(':'); 
+             const scannedCount = scannedParts.filter(Boolean).length;
+             if (scannedCount === expectedParts) {
+                await App.stopScannerSafely(); instruction.textContent = "Connecting..."; onSuccess(scannedParts.join(''));
+             } else { instruction.textContent = `Scanned ${scannedCount} of ${expectedParts}. Scan next!`; }
+          }
+       } else {
+          await App.stopScannerSafely(); onSuccess(extractCode(text));
+       }
+    };
+
+    const startCam = async () => {
+       await App.stopScannerSafely(); readerWrapper.style.display = 'block';
+       html5QrCode = new Html5Qrcode("reader-container");
+       try { await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: (vw, vh) => ({ width: Math.min(vw, vh) * 0.8, height: Math.min(vw, vh) * 0.8 }) }, handleScan); } 
+       catch(e) { alert("Camera failed."); }
+    };
+
+    const btnCam = Utils.createElement('button', '📸 Open Camera', 'secondary');
+    btnCam.onclick = () => startCam();
+    const btnBack = Utils.createElement('button', 'Cancel', 'secondary');
+    btnBack.onclick = () => App.renderState('IDLE');
+    
+    btnGroup.appendChild(btnCam); card.appendChild(btnGroup); card.appendChild(btnBack);
+    view.appendChild(card); App.container.innerHTML = ''; App.container.appendChild(view);
+  },
+
+  renderQRCarousel(container, base64Payload) {
+    const chunks = createQRChunks(base64Payload); let currentIndex = 0;
+    const qrWrap = Utils.createElement('div'); const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; qrWrap.appendChild(qrDiv);
+
+    if(chunks.length > 1) {
+      const navWrap = Utils.createElement('div', '', 'qr-carousel');
+      const btnPrev = Utils.createElement('button', '❮', 'secondary qr-nav-btn');
+      const btnNext = Utils.createElement('button', '❯', 'secondary qr-nav-btn');
+      const lblStatus = Utils.createElement('span', `QR 1 of ${chunks.length}`, 'qr-status');
+      navWrap.appendChild(btnPrev); navWrap.appendChild(lblStatus); navWrap.appendChild(btnNext); qrWrap.appendChild(navWrap);
+
+      const updateQR = () => {
+        qrDiv.innerHTML = '';
+        new QRCode(qrDiv, { text: chunks[currentIndex], width: 250, height: 250, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
+        lblStatus.textContent = `QR ${currentIndex + 1} of ${chunks.length}`;
+        btnPrev.disabled = currentIndex === 0; btnNext.disabled = currentIndex === chunks.length - 1;
+      };
+      btnPrev.onclick = () => { if(currentIndex > 0) { currentIndex--; updateQR(); }};
+      btnNext.onclick = () => { if(currentIndex < chunks.length - 1) { currentIndex++; updateQR(); }};
+      setTimeout(updateQR, 100);
+    } else { setTimeout(() => new QRCode(qrDiv, { text: chunks[0], width: 250, height: 250, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L }), 100); }
+    container.appendChild(qrWrap);
+  },
+
+  async hostCloudRoom(pin) {
+    const card = Utils.createElement('div', '', 'card');
+    card.innerHTML = `<h1 class="brand">Room Created</h1><p>Tell friend to enter PIN:</p><h2 class="otp-input">${pin}</h2>${animHTML}<p style="margin-top:10px; font-size:0.85rem;">Waiting for them...</p>`;
+    App.container.innerHTML = '<div class="view"></div>'; App.container.firstChild.appendChild(card);
+    
+    connection = new P2PConnection(App);
+    try {
+      const offerStr = await connection.generateOffer();
+      await fetch(APP_SCRIPT_URL, { method: 'POST', body: JSON.stringify({ room: pin, type: 'offer', payload: offerStr }) });
+      const poll = setInterval(async () => {
+        const res = await fetch(`${APP_SCRIPT_URL}?room=${pin}&type=get_answer`);
+        const data = await res.json();
+        if (data.payload) {
+          clearInterval(poll);
+          const answerSignal = Protocol.validateSignal(data.payload, 'answer');
+          if (answerSignal) connection.acceptAnswer(answerSignal);
+        }
+      }, 3000);
+    } catch(e) { alert("Cloud failed."); App.renderState('IDLE'); }
+  },
+
+  async joinCloudRoom(pin) {
+    const card = Utils.createElement('div', '', 'card');
+    card.innerHTML = `<h1>Connecting...</h1><p>Looking for PIN: ${pin}</p>${animHTML}`;
+    App.container.innerHTML = '<div class="view"></div>'; App.container.firstChild.appendChild(card);
+    
+    connection = new P2PConnection(App);
+    try {
+      const res = await fetch(`${APP_SCRIPT_URL}?room=${pin}&type=get_offer`);
+      const data = await res.json();
+      if (!data.payload) throw new Error("Room not found.");
+      const answerStr = await connection.acceptOfferAndGenerateAnswer(Protocol.validateSignal(data.payload, 'offer'));
+      await fetch(APP_SCRIPT_URL, { method: 'POST', body: JSON.stringify({ room: pin, type: 'answer', payload: answerStr }) });
+    } catch(e) { alert(e.message); App.renderState('IDLE'); }
+  },
+
+  async hostManualRoom() {
+    const card = Utils.createElement('div', '', 'card');
+    card.innerHTML = `<h1>Generating Keys...</h1>${animHTML}`;
+    App.container.innerHTML = '<div class="view"></div>'; App.container.firstChild.appendChild(card);
+
+    setTimeout(async () => {
+      connection = new P2PConnection(App);
+      const offerStr = await connection.generateOffer();
+      const base64 = Utils.encodeBase64Url(offerStr);
+      card.innerHTML = '<h1 class="brand">Offline Room</h1><p>Share this QR to connect</p>';
+      App.renderQRCarousel(card, base64);
+      setTimeout(() => {
+        const btnScan = Utils.createElement('button', 'Provide Answer Code');
+        btnScan.onclick = () => App.renderScannerUI('answer', (decoded) => {
+           const ans = Protocol.validateSignal(Utils.decodeBase64Url(decoded), 'answer');
+           if(ans) connection.acceptAnswer(ans); else { alert("Invalid."); App.renderState('IDLE'); } 
+        });
+        card.appendChild(btnScan);
+      }, 200);
+    }, 100);
+  },
+
+  async handleManualJoin(offerSignal) {
+    const card = Utils.createElement('div', '', 'card');
+    card.innerHTML = `<h1>Securing...</h1>${animHTML}`;
+    App.container.innerHTML = '<div class="view"></div>'; App.container.firstChild.appendChild(card);
+
+    setTimeout(async () => {
+      connection = new P2PConnection(App);
+      const ansStr = await connection.acceptOfferAndGenerateAnswer(offerSignal);
+      const base64 = Utils.encodeBase64Url(ansStr);
+      card.innerHTML = '<h1 class="brand">Send Answer</h1><p>Scan this back to the Host</p>';
+      App.renderQRCarousel(card, base64);
+    }, 100);
+  },
+
+  // -------------------------
+  // 2. LIVE CHAT UI LOGIC
+  // -------------------------
   buildChatView() {
     const tpl = document.getElementById('tpl-chat').content.cloneNode(true);
     App.container.appendChild(tpl);
 
-    // Setup Tools
-    document.getElementById('btn-end').onclick = () => { connection.destroy(); App.renderState('IDLE'); };
+    // Tools
+    document.getElementById('btn-end').onclick = () => { if(connection) connection.destroy(); App.renderState('IDLE'); };
     document.getElementById('btn-set-dir').onclick = async () => {
       const ok = await FileSystem.requestDirectory();
       if(ok) document.getElementById('btn-set-dir').style.color = '#10b981';
     };
-    
     document.getElementById('btn-screen-cast').onclick = () => connection.toggleScreenCasting();
 
     // Drawing Canvas
@@ -169,29 +355,67 @@ const App = {
     };
     
     sendBtn.onclick = sendMsg;
-    // Enter sends, Shift+Enter new line. Does not dismiss mobile keyboard natively in textarea.
+    // Fix native keyboard glitch on mobile -> Shift+Enter for new line, Enter to send
     input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } };
 
-    // File Input Unlimited Queue
+    // File Input Queue
     const fileInput = document.getElementById('file-input');
     document.getElementById('btn-file').onclick = () => fileInput.click();
-    fileInput.onchange = (e) => { if(e.target.files.length) connection.enqueueFiles(e.target.files); fileInput.value = ''; };
+    fileInput.onchange = (e) => { if(e.target.files.length && connection) connection.enqueueFiles(e.target.files); fileInput.value = ''; };
 
-    // Read Receipt Observer
+    // Read Receipt Trigger Area
     App.receiptObserver = new IntersectionObserver((entries) => {
       entries.forEach(ent => {
         if (ent.isIntersecting && ent.target.dataset.status === 'deliv') {
           ent.target.dataset.status = 'seen';
-          connection.sendPayload(Protocol.createReceipt(ent.target.id, 2));
+          if(connection) connection.sendPayload(Protocol.createReceipt(ent.target.id, 2));
         }
       });
     }, { root: document.getElementById('chat-log'), threshold: 0.5 });
   },
 
+  onStateChange(status, msg) {
+    if (status === 'CONNECTED') {
+      Synthesizer.init(); 
+      App.renderState('CONNECTED', true);
+      App.startHUD();
+    } else if (status === 'ERR_PEER_DISCONNECTED' || status === 'CLOSED') {
+      clearInterval(App.sessionTimer); clearInterval(App.metricsInterval);
+      document.getElementById('metrics-hud').classList.add('hidden');
+      alert(msg); App.renderState('IDLE', true);
+    }
+  },
+
+  startHUD() {
+    document.getElementById('metrics-hud').classList.remove('hidden');
+    App.sessionStartTime = Date.now();
+    App.sessionTimer = setInterval(() => {
+      const secs = Math.floor((Date.now() - App.sessionStartTime) / 1000);
+      document.getElementById('session-timer').textContent = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+    }, 1000);
+
+    App.metricsInterval = setInterval(() => {
+      if(!connection) return;
+      const current = connection.getMetrics();
+      const diffRx = current.rxBytes - App.lastMetrics.rxBytes;
+      const diffTx = current.txBytes - App.lastMetrics.txBytes;
+      document.getElementById('transfer-speed').textContent = `${((diffRx + diffTx) / (1024 * 1024)).toFixed(2)} MB/s`;
+      App.lastMetrics = { ...current };
+      
+      let usage = JSON.parse(localStorage.getItem('wchat_data') || '{"up":0,"down":0}');
+      usage.up += diffTx; usage.down += diffRx;
+      localStorage.setItem('wchat_data', JSON.stringify(usage));
+      document.getElementById('data-counter').textContent = `${(usage.up/(1024*1024)).toFixed(2)} MB ⬆ | ${(usage.down/(1024*1024)).toFixed(2)} MB ⬇`;
+    }, 1000);
+  },
+
+  // -------------------------
+  // 3. HARDWARE ROUTING ENGINE
+  // -------------------------
   onMessageRouter(msg) {
     if (msg.type === Protocol.TYPES.CHAT) {
       App.renderMessage(msg, false);
-      connection.sendPayload(Protocol.createReceipt(msg.id, 1)); // Send Delivered state
+      connection.sendPayload(Protocol.createReceipt(msg.id, 1)); 
       Synthesizer.playSwoosh();
     }
     else if (msg.type === Protocol.TYPES.GHOST) App.handleGhost(msg);
@@ -211,18 +435,12 @@ const App = {
       <div class="msg-bubble">${msg.text}</div>
       <div class="msg-meta">
         ${new Date(msg.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-        ${isSelf ? `<span class="msg-ticks" id="tick-${msg.id}">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
-        </span>` : ''}
+        ${isSelf ? `<span class="msg-ticks" id="tick-${msg.id}"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg></span>` : ''}
       </div>`;
     
     log.appendChild(wrap);
     log.scrollTop = log.scrollHeight;
-    
-    if (!isSelf) {
-      wrap.dataset.status = 'deliv';
-      App.receiptObserver.observe(wrap);
-    }
+    if (!isSelf) { wrap.dataset.status = 'deliv'; App.receiptObserver.observe(wrap); }
   },
 
   handleGhost(msg) {
@@ -237,14 +455,13 @@ const App = {
   updateReceipt(id, status) {
     const tick = document.getElementById(`tick-${id}`);
     if(!tick) return;
-    if(status === 1) tick.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M18 6l-9 11-4-5"/><path d="M22 6l-9 11"/></svg>'; // Double Grey
-    if(status === 2) { tick.classList.add('seen'); } // Double Green injected via CSS
+    if(status === 1) tick.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M18 6l-9 11-4-5"/><path d="M22 6l-9 11"/></svg>';
+    if(status === 2) tick.classList.add('seen');
   },
 
   async onIncomingFileStart(msg) {
     let stream = null;
     if (FileSystem.sessionFolder) stream = await FileSystem.createWritable(msg.name);
-    
     App.activeIncomingFile = { id: msg.id, name: msg.name, size: msg.size, chunks: [], stream: stream, received: 0 };
     App.onFileTransferStart(msg.id, msg.name, msg.size, false);
   },
@@ -253,17 +470,13 @@ const App = {
     const f = App.activeIncomingFile;
     if(!f) return;
     f.received += buffer.byteLength;
-    
-    if (f.stream) await f.stream.write(buffer);
-    else f.chunks.push(buffer);
-    
+    if (f.stream) await f.stream.write(buffer); else f.chunks.push(buffer);
     App.onFileTransferProgress(f.id, (f.received / f.size) * 100);
   },
 
   async onIncomingFileEnd(id, aborted = false) {
     const f = App.activeIncomingFile;
     if(!f || f.id !== id) return;
-    
     if (f.stream) await f.stream.close();
     else if (!aborted) {
       const blob = new Blob(f.chunks);
@@ -300,7 +513,7 @@ const App = {
     const txt = document.getElementById(`text-${id}`);
     const bar = document.getElementById(`prog-${id}`);
     if(success && bar) bar.style.width = '100%';
-    if(txt) txt.textContent = success ? (url ? 'Received & Saved ✅' : 'Transfer Complete ✅') : '❌ Cancelled';
+    if(txt) txt.textContent = success ? (FileSystem.sessionFolder ? 'Saved to Disk ✅' : 'Received ✅') : '❌ Cancelled';
   },
 
   onScreenCastReceived(stream) {
@@ -314,3 +527,6 @@ const App = {
     video.srcObject = stream;
   }
 };
+
+// Start application immediately upon window ready
+window.onload = () => App.init();
