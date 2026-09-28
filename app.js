@@ -42,7 +42,6 @@ const App = {
   activeIncomingFile: null, activeBatches: {},
 
   init() {
-    // Physical fix for safe mobile scaling when keyboard opens
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', () => {
         document.body.style.height = window.visualViewport.height + 'px';
@@ -199,7 +198,7 @@ const App = {
       input.value = ''; input.style.height = '44px';
     };
 
-    // THE SILVER BULLET for Keyboard staying open
+    // Prevent default touch/click from closing the mobile keyboard
     sendBtn.addEventListener('pointerdown', (e) => e.preventDefault()); 
     sendBtn.onclick = (e) => { e.preventDefault(); sendMsg(); };
     input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } };
@@ -306,12 +305,12 @@ const App = {
 
   onFileTransferStart(id, name, size, isUpload, batchId = null) {
     const log = document.getElementById('chat-log');
-    const boxHTML = `<div class="file-row"><strong style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80%;">${name}</strong>${isUpload ? `<button class="btn-cancel" onclick="connection.cancelActiveTransfer()" title="Cancel">✕</button>` : ''}</div><div class="file-row"><small>${(size/(1024*1024)).toFixed(2)} MB</small><small id="text-${id}">${isUpload ? 'Sending' : 'Receiving'}...</small></div><div class="file-progress-bg"><div id="prog-${id}" class="file-progress-fill"></div></div>`;
+    const boxHTML = `<div class="file-row"><strong style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80%; color:var(--text-main);">${name}</strong>${isUpload ? `<button class="btn-cancel" onclick="connection.cancelActiveTransfer()" title="Cancel">✕</button>` : ''}</div><div class="file-row" style="color:var(--text-sub);"><small>${(size/(1024*1024)).toFixed(2)} MB</small><small id="text-${id}">${isUpload ? 'Sending' : 'Receiving'}...</small></div><div class="file-progress-bg"><div id="prog-${id}" class="file-progress-fill"></div></div>`;
     const el = Utils.createElement('div', '', 'msg-bubble file-bubble'); el.id = 'ui-f-' + id; el.innerHTML = boxHTML;
     
     const target = (batchId && App.activeBatches[batchId]?.ui) ? App.activeBatches[batchId].ui : log;
     if (target === log) { const wrap = Utils.createElement('div', '', `msg-wrap ${isUpload ? 'self' : 'peer'}`); wrap.appendChild(el); target.appendChild(wrap); } 
-    else { el.style.width = '100%'; el.style.border = 'none'; target.appendChild(el); target.classList.add('open'); }
+    else { el.style.width = '100%'; el.style.border = '1px solid var(--border)'; target.appendChild(el); target.classList.add('open'); }
     log.scrollTop = log.scrollHeight;
   },
 
