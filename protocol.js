@@ -6,8 +6,10 @@ const Protocol = {
   SIGNAL_EXPIRATION_MS: 5 * 60 * 1000,
   
   TYPES: { 
-    CHAT: 'chat', GHOST: 'ghost', DRAW: 'draw_stroke', DRAW_UNDO: 'draw_undo', 
-    DRAW_CLEAR: 'draw_clear', FILE_START: 'file_start', FILE_CHUNK: 'file_chunk', 
+    CHAT: 'chat', GHOST: 'ghost', 
+    DRAW: 'draw_stroke', DRAW_UNDO: 'draw_undo', DRAW_CLEAR: 'draw_clear', 
+    DRAW_START: 'd_st', DRAW_PT: 'd_pt', DRAW_FINISH: 'd_end', // Live Sync additions
+    FILE_START: 'file_start', FILE_CHUNK: 'file_chunk', 
     FILE_END: 'file_end', FILE_CANCEL: 'file_cancel', RECEIPT: 'receipt', 
     SCREEN_OFFER: 'screen_offer', SCREEN_ANSWER: 'screen_answer' 
   },
@@ -23,11 +25,8 @@ const Protocol = {
   
   createChatMessage: (text) => JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.CHAT, id: Utils.generateId(), text: text.slice(0, Protocol.MAX_MESSAGE_LENGTH), ts: Date.now() }),
   createGhostTyping: (text, isTyping) => JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.GHOST, text: text.slice(0, 500), active: isTyping }),
-  createDrawStroke: (stroke) => JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.DRAW, stroke: stroke }),
   createDrawCommand: (type) => JSON.stringify({ v: Protocol.VERSION, type: type }),
   createFileHeader: (file, id, bId, bTot) => JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.FILE_START, id: id, name: file.name, size: file.size, mime: file.type || 'application/octet-stream', bId: bId, bTot: bTot }),
-  
-  // THE MISSING FUNCTION
   createReceipt: (msgId, status) => JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.RECEIPT, id: msgId, status: status }),
   
   parsePayload: (str) => { 
