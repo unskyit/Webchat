@@ -387,11 +387,13 @@ const App = {
   },
 
   startHUD() {
-    document.getElementById('metrics-hud').classList.remove('hidden');
+    const hud = document.getElementById('metrics-hud');
+    if(hud) hud.style.display = 'block';
     App.sessionStartTime = Date.now();
     App.sessionTimer = setInterval(() => {
       const secs = Math.floor((Date.now() - App.sessionStartTime) / 1000);
-      document.getElementById('session-timer').textContent = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+      const timerEl = document.getElementById('session-timer');
+      if(timerEl) timerEl.textContent = `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
     }, 1000);
 
     App.metricsInterval = setInterval(() => {
@@ -399,16 +401,105 @@ const App = {
       const current = connection.getMetrics();
       const diffRx = current.rxBytes - App.lastMetrics.rxBytes;
       const diffTx = current.txBytes - App.lastMetrics.txBytes;
-      document.getElementById('transfer-speed').textContent = `${((diffRx + diffTx) / (1024 * 1024)).toFixed(2)} MB/s`;
+      const speedEl = document.getElementById('transfer-speed');
+      if(speedEl) speedEl.textContent = `${((diffRx + diffTx) / (1024 * 1024)).toFixed(2)} MB/s`;
       App.lastMetrics = { ...current };
       
       let usage = JSON.parse(localStorage.getItem('wchat_data') || '{"up":0,"down":0}');
       usage.up += diffTx; usage.down += diffRx;
       localStorage.setItem('wchat_data', JSON.stringify(usage));
-      document.getElementById('data-counter').textContent = `${(usage.up/(1024*1024)).toFixed(2)} MB ⬆ | ${(usage.down/(1024*1024)).toFixed(2)} MB ⬇`;
+      const countEl = document.getElementById('data-counter');
+      if(countEl) countEl.textContent = `${(usage.up/(1024*1024)).toFixed(2)} MB ⬆ | ${(usage.down/(1024*1024)).toFixed(2)} MB ⬇`;
     }, 1000);
   },
 
+  buildChatView() {
+    const tpl = document.getElementById('tpl-chat').content.cloneNode(true);
+    App.container.appendChild(tpl);
+
+    // End chat
+    document.getElementById('btn-end').onclick = () => { if(connection) connection.destroy(); App.renderState('IDLE'); };
+
+    // Dice Menu Logic
+    const diceBtn = document.getElementById('btn-dice');
+    const diceMenu = document.getElementById('dice-menu');
+    diceBtn.onclick = (e) => { e.stopPropagation(); diceMenu.classList.toggle('active'); };
+    
+    document.addEventListener('click', (e) => {
+      if(diceMenu && !diceMenu.contains(e.target) && e.target !== diceBtn) {
+        diceMenu.classList.remove('active');
+      }
+    });
+
+    // Menu Actions
+    document.getElementById('btn-set-dir').onclick = async () => {
+      diceMenu.classList.remove('active');
+      const ok = await FileSystem.requestDirectory();
+      if(ok) document.getElementById('btn-set-dir').style.color = '#10b981';
+    };
+    
+    document.getElementById('btn-screen-cast').onclick = () => {
+      diceMenu.classList.remove('active');
+      connection.toggleScreenCasting();
+    };
+
+    const fileInput = document.getElementById('file-input');
+    document.getElementById('btn-file').onclick = () => { diceMenu.classList.remove('active'); fileInput.click(); };
+    fileInput.onchange = (e) => { if(e.target.files.length && connection) connection.enqueueFiles(e.target.files); fileInput.value = ''; };
+
+    // Drawing Canvas
+    DrawController.init('chat-canvas', (cmdStr) => connection.sendPayload(cmdStr));
+    const drawToolbar = document.getElementById('draw-toolbar');
+    
+    document.getElementById('btn-draw-toggle').onclick = () => {
+      diceMenu.classList.remove('active');
+      DrawController.toggle(!DrawController.isActive);
+      drawToolbar.classList.toggle('hidden', !DrawController.isActive);
+    };
+    
+    document.querySelectorAll('.color-swatch').forEach(el => {
+      el.onclick = () => { document.querySelector('.color-swatch.active').classList.remove('active'); el.classList.add('active'); DrawController.setColor(el.dataset.color); };
+    });
+    document.getElementById('btn-draw-undo').onclick = () => DrawController.undo(true);
+    document.getElementById('btn-draw-clear').onclick = () => DrawController.clear(true);
+    document.getElementById('btn-draw-close').onclick = () => { DrawController.toggle(false); drawToolbar.classList.add('hidden'); };
+
+    // Chat Inputs & Ghosting
+    const input = document.getElementById('chat-input');
+    let ghostTimeout;
+    input.oninput = () => {
+      if (App.settings.ghostTyping && connection) {
+        connection.sendPayload(Protocol.createGhostTyping(input.value, true));
+        clearTimeout(ghostTimeout);
+        ghostTimeout = setTimeout(() => connection.sendPayload(Protocol.createGhostTyping('', false)), 2000);
+      }
+    };
+    
+    const sendBtn = document.getElementById('btn-send');
+    const sendMsg = () => {
+      const txt = input.value.trim();
+      if (!txt || !connection) return;
+      const msg = Protocol.createChatMessage(txt);
+      connection.sendPayload(msg);
+      if(App.settings.ghostTyping) connection.sendPayload(Protocol.createGhostTyping('', false));
+      App.renderMessage(JSON.parse(msg), true);
+      Synthesizer.playPop();
+      input.value = '';
+    };
+    
+    sendBtn.onclick = sendMsg;
+    input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } };
+
+    // Read Receipt Trigger Area
+    App.receiptObserver = new IntersectionObserver((entries) => {
+      entries.forEach(ent => {
+        if (ent.isIntersecting && ent.target.dataset.status === 'deliv') {
+          ent.target.dataset.status = 'seen';
+          if(connection) connection.sendPayload(Protocol.createReceipt(ent.target.id, 2));
+        }
+      });
+    }, { root: document.getElementById('chat-log'), threshold: 0.5 });
+  }
   // -------------------------
   // 3. HARDWARE ROUTING ENGINE
   // -------------------------
