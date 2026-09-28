@@ -181,3 +181,31 @@ input:checked + .slider:before { transform: translateX(20px); }
 @keyframes shootBeam { 0% { left: -50px; } 100% { left: 100px; } }
 .hidden { display: none !important; }
 .mt-10 { margin-top: 10px; }
+
+/* --- FILE UI FIXES --- */
+/* Prevent sender file bubble from turning entirely blue so progress bar is visible */
+.msg-wrap.self .file-bubble { 
+  background: var(--bg-card) !important; 
+  color: var(--text-main) !important; 
+  border: 1px solid var(--primary); 
+  border-bottom-right-radius: 4px; 
+}
+.msg-wrap.self .file-row strong, .msg-wrap.self .file-row small { 
+  color: var(--text-main) !important; 
+}
+
+/* Force long file names to truncate with an ellipsis without blowing out the box */
+.file-row { 
+  display: flex; justify-content: space-between; align-items: center; 
+  font-size: 0.85rem; width: 100%; gap: 10px; 
+}
+.file-name { 
+  flex: 1; overflow: hidden; text-overflow: ellipsis; 
+  white-space: nowrap; text-align: left; min-width: 0; 
+}
+
+/* Audio preview styling */
+.media-preview-audio { 
+  width: 100%; height: 40px; margin-bottom: 8px; 
+  outline: none; border-radius: 20px; 
+}
