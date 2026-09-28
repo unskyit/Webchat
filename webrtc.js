@@ -11,7 +11,6 @@ class P2PConnection {
     this.activeTransfer = null;
     this.metrics = { txBytes: 0, rxBytes: 0 };
     
-    // FIX: Added state tracking for screencasting
     this.screenStream = null;
     this.screenSender = null;
   }
@@ -25,7 +24,6 @@ class P2PConnection {
       } 
     };
     
-    // FIX: Added WebRTC track listener to catch incoming screen streams
     this.pc.ontrack = (event) => {
       if (event.streams && event.streams.length > 0) {
         this.app.onScreenCastReceived(event.streams[0]);
@@ -96,14 +94,12 @@ class P2PConnection {
     return true; 
   }
 
-  // FIX: Added the missing toggleScreenCasting method
   async toggleScreenCasting() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
       alert("Screen sharing is not supported on this device/browser.");
       return;
     }
     
-    // Stop sharing if active
     if (this.screenStream) {
       this.screenStream.getTracks().forEach(t => t.stop());
       this.screenStream = null;
@@ -115,17 +111,14 @@ class P2PConnection {
       return;
     }
 
-    // Start sharing
     try {
       this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
       const track = this.screenStream.getVideoTracks()[0];
       
-      // Handle the user clicking "Stop Sharing" on the browser's native UI overlay
       track.onended = () => this.toggleScreenCasting(); 
       
       this.screenSender = this.pc.addTrack(track, this.screenStream);
       
-      // Renegotiate WebRTC via SDP for the new media track
       const offer = await this.pc.createOffer();
       await this.pc.setLocalDescription(offer);
       this.sendPayload(JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.SCREEN_OFFER, sdp: this.pc.localDescription }));
@@ -134,7 +127,6 @@ class P2PConnection {
     }
   }
 
-  // FIX: Added the missing screen signal router
   async handleScreenSignal(msg) {
     if (msg.type === Protocol.TYPES.SCREEN_OFFER) {
       await this.pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
@@ -144,7 +136,6 @@ class P2PConnection {
     } else if (msg.type === Protocol.TYPES.SCREEN_ANSWER) {
       await this.pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
     } else if (msg.type === 'screen_stop') {
-      // Clean up the UI on the receiving end
       const cont = document.getElementById('media-container');
       if (cont) cont.classList.add('hidden');
       const vid = document.getElementById('remote-screen');
@@ -165,19 +156,38 @@ class P2PConnection {
     const item = this.fileQueue.shift();
     const fileId = 'f-' + Utils.generateId();
     this.sendPayload(Protocol.createFileHeader(item.file, fileId, item.bId, item.bTot));
-    // FIX: Pass the actual file object as the last argument to render a preview on sender side
+    
     this.app.onFileTransferStart(fileId, item.file.name, item.file.size, true, item.bId, item.file);
 
-    const chunkSize = 65536; let offset = 0;
+    // Reduced chunk size to 16KB to prevent SCTP fragmentation & corruption[cite: 1]
+    const chunkSize = 16384; 
+    let offset = 0;
     this.activeTransfer = { id: fileId, aborted: false };
-    const sliceRead = (o) => new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsArrayBuffer(item.file.slice(o, o + chunkSize)); });
 
     while (offset < item.file.size && !this.activeTransfer.aborted) {
-      if (this.dc.bufferedAmount > this.dc.bufferedAmountLowThreshold) await new Promise(r => { this.dc.onbufferedamountlow = () => { this.dc.onbufferedamountlow = null; r(); }; });
+      if (this.dc.bufferedAmount > this.dc.bufferedAmountLowThreshold) {
+        // Polling fallback to ensure robust draining during heavy loads[cite: 1]
+        await new Promise(r => { 
+            const check = () => {
+                if (this.dc.bufferedAmount <= this.dc.bufferedAmountLowThreshold) r();
+                else setTimeout(check, 10);
+            };
+            check();
+        });
+      }
       if (this.activeTransfer.aborted) break;
-      const chunk = await sliceRead(offset);
-      this.dc.send(chunk); this.metrics.txBytes += chunk.byteLength;
-      offset += chunk.byteLength; this.app.onFileTransferProgress(fileId, (offset / item.file.size) * 100);
+      
+      try {
+        // Modern approach to fetch chunk natively without FileReader async quirks[cite: 1]
+        const chunk = await item.file.slice(offset, offset + chunkSize).arrayBuffer();
+        this.dc.send(chunk); 
+        this.metrics.txBytes += chunk.byteLength;
+        offset += chunk.byteLength; 
+        this.app.onFileTransferProgress(fileId, (offset / item.file.size) * 100);
+      } catch (err) {
+        console.error("Transmission error: ", err);
+        break;
+      }
     }
 
     this.sendPayload(JSON.stringify({ v: Protocol.VERSION, type: this.activeTransfer.aborted ? Protocol.TYPES.FILE_CANCEL : Protocol.TYPES.FILE_END, id: fileId }));
