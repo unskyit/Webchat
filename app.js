@@ -1,7 +1,9 @@
-// app.js - Layout Hooks, Persistent Keyboard & Connection Engine
+// app.js - Controller, Event Routing & UI Lifecycle
 
 const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3dP8CzVtTl1JCrNyibhOypH5lKyB7adpK6pBMUjk69WKruStFLbpwQ/exec"; 
 let connection = null;
+let html5QrCode = null;
+let deferredPrompt = null;
 
 const animHTML = `
   <div class="link-animation">
@@ -10,6 +12,20 @@ const animHTML = `
     <div class="orb"></div>
   </div>
 `;
+
+function createQRChunks(base64) {
+  const TOTAL_CHUNKS = App.settings.qrChunks;
+  const chunkSize = Math.ceil(base64.length / TOTAL_CHUNKS);
+  const chunks = [];
+  for(let i = 0; i < base64.length; i += chunkSize) chunks.push(base64.substring(i, i + chunkSize));
+  if (TOTAL_CHUNKS === 1) return [`WCT:1/1:${base64}`]; 
+  return chunks.map((c, i) => `WCT:${i+1}/${chunks.length}:${c}`);
+}
+
+function extractCode(text) {
+  if (text.includes('#join=')) return text.split('#join=')[1];
+  return text.trim();
+}
 
 const Synthesizer = {
   ctx: null,
@@ -42,15 +58,6 @@ const App = {
   activeIncomingFile: null, activeBatches: {},
 
   init() {
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', () => {
-        document.body.style.height = window.visualViewport.height + 'px';
-        window.scrollTo(0,0);
-        const log = document.getElementById('chat-log');
-        if(log) log.scrollTop = log.scrollHeight;
-      });
-    }
-
     window.addEventListener('popstate', (e) => {
       if (e.state && e.state.view) App.renderState(e.state.view, false);
       else App.renderState('IDLE', false);
@@ -66,15 +73,42 @@ const App = {
       App.renderState('IDLE', true);
     };
 
+    const qrSlider = document.getElementById('qr-slider');
+    if (qrSlider) {
+      qrSlider.oninput = (e) => {
+        App.settings.qrChunks = parseInt(e.target.value);
+        document.getElementById('qr-slider-val').textContent = App.settings.qrChunks;
+      };
+    }
+
+    const btnInstall = document.getElementById('btn-install-pwa');
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault(); deferredPrompt = e; btnInstall.classList.remove('hidden');
+    });
+    btnInstall.addEventListener('click', async () => {
+      if (deferredPrompt) { deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; btnInstall.classList.add('hidden'); }
+    });
+
     let savedUsage = JSON.parse(localStorage.getItem('wchat_data') || '{"up":0,"down":0}');
     document.getElementById('data-counter').textContent = `${(savedUsage.up/(1024*1024)).toFixed(2)} MB ⬆ | ${(savedUsage.down/(1024*1024)).toFixed(2)} MB ⬇`;
 
     App.renderState('IDLE', true);
   },
 
+  async stopScannerSafely() {
+    if (html5QrCode) {
+      try { await html5QrCode.stop(); } catch(e) {}
+      try { html5QrCode.clear(); } catch(e) {}
+      html5QrCode = null;
+    }
+    const rc = document.getElementById('reader-container');
+    if (rc) { rc.style.display = 'none'; rc.innerHTML = ''; }
+  },
+
   renderState(state, pushHistory = true) {
     if (pushHistory) history.pushState({ view: state }, '', `#${state}`);
-    App.container.innerHTML = '';
+    App.container.innerHTML = ''; 
+    App.stopScannerSafely();
     
     const headerActions = document.getElementById('header-actions');
     if (state === 'IDLE') {
@@ -93,15 +127,84 @@ const App = {
   buildIdleView() {
     const view = Utils.createElement('div', '', 'view idle-view');
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = `<h1>New Session</h1><p>${App.settings.useCloud ? 'Enter a PIN to connect.' : 'Create an offline room.'}</p>`;
+    card.innerHTML = `<h1 class="brand">New Session</h1><p>${App.settings.useCloud ? 'Enter a PIN to connect.' : 'Create an offline room.'}</p>`;
 
     if (App.settings.useCloud) {
       const inputOTP = Utils.createElement('input', '', 'otp-input'); inputOTP.placeholder = "e.g. secret45";
       const btnHost = Utils.createElement('button', 'Create Room'); btnHost.onclick = () => { if(inputOTP.value) App.hostCloudRoom(inputOTP.value.trim().toLowerCase()); };
       const btnJoin = Utils.createElement('button', 'Join Room', 'secondary'); btnJoin.onclick = () => { if(inputOTP.value) App.joinCloudRoom(inputOTP.value.trim().toLowerCase()); };
       card.appendChild(inputOTP); card.appendChild(btnHost); card.appendChild(btnJoin);
+    } else {
+      const btnHost = Utils.createElement('button', 'Create Offline Room'); btnHost.onclick = () => App.hostManualRoom();
+      const btnJoin = Utils.createElement('button', 'Join Offline Room', 'secondary');
+      btnJoin.onclick = () => App.renderScannerUI('offer', (decoded) => {
+        const sig = Protocol.validateSignal(Utils.decodeBase64Url(decoded), 'offer');
+        if (sig) App.handleManualJoin(sig); else { alert("Invalid Offer Code."); App.renderState('IDLE'); }
+      });
+      card.appendChild(btnHost); card.appendChild(btnJoin);
     }
     view.appendChild(card); App.container.appendChild(view);
+  },
+
+  renderScannerUI(expectedType, onSuccess) {
+    const view = Utils.createElement('div', '', 'view idle-view');
+    const card = Utils.createElement('div', '', 'card');
+    card.innerHTML = `<h1 class="brand">Scan QR</h1><p>Point camera at the QR code(s).</p>`;
+    
+    const instruction = Utils.createElement('div', 'Scan QR Code 1', 'scan-instruction');
+    const readerWrapper = Utils.createElement('div'); readerWrapper.id = 'reader-container'; readerWrapper.style.display = 'none';
+    card.appendChild(instruction); card.appendChild(readerWrapper);
+
+    let scannedParts = []; let expectedParts = 0;
+    const handleScan = async (text) => {
+       if (text.startsWith('WCT:')) {
+          const parts = text.split(':');
+          if (parts.length >= 3) {
+             const info = parts[1].split('/');
+             const index = parseInt(info[0]) - 1; expectedParts = parseInt(info[1]);
+             if (!scannedParts[index]) scannedParts[index] = parts.slice(2).join(':'); 
+             const scannedCount = scannedParts.filter(Boolean).length;
+             if (scannedCount === expectedParts) { await App.stopScannerSafely(); instruction.textContent = "Connecting..."; onSuccess(scannedParts.join('')); } 
+             else { instruction.textContent = `Scanned ${scannedCount} of ${expectedParts}. Scan next!`; }
+          }
+       } else { await App.stopScannerSafely(); onSuccess(extractCode(text)); }
+    };
+
+    const startCam = async () => {
+       await App.stopScannerSafely(); readerWrapper.style.display = 'block';
+       html5QrCode = new Html5Qrcode("reader-container");
+       try { await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: (vw, vh) => ({ width: Math.min(vw, vh) * 0.8, height: Math.min(vw, vh) * 0.8 }) }, handleScan); } 
+       catch(e) { alert("Camera failed."); }
+    };
+
+    const btnCam = Utils.createElement('button', '📸 Open Camera', 'secondary'); btnCam.onclick = () => startCam();
+    const btnBack = Utils.createElement('button', 'Cancel', 'secondary'); btnBack.onclick = () => App.renderState('IDLE');
+    
+    card.appendChild(btnCam); card.appendChild(btnBack);
+    view.appendChild(card); App.container.innerHTML = ''; App.container.appendChild(view);
+  },
+
+  renderQRCarousel(container, base64Payload) {
+    const chunks = createQRChunks(base64Payload); let currentIndex = 0;
+    const qrWrap = Utils.createElement('div'); const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; qrWrap.appendChild(qrDiv);
+
+    if(chunks.length > 1) {
+      const navWrap = Utils.createElement('div', '', 'qr-carousel');
+      const btnPrev = Utils.createElement('button', '❮', 'secondary qr-nav-btn'); const btnNext = Utils.createElement('button', '❯', 'secondary qr-nav-btn');
+      const lblStatus = Utils.createElement('span', `QR 1 of ${chunks.length}`, 'qr-status');
+      navWrap.appendChild(btnPrev); navWrap.appendChild(lblStatus); navWrap.appendChild(btnNext); qrWrap.appendChild(navWrap);
+
+      const updateQR = () => {
+        qrDiv.innerHTML = '';
+        new QRCode(qrDiv, { text: chunks[currentIndex], width: 250, height: 250, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
+        lblStatus.textContent = `QR ${currentIndex + 1} of ${chunks.length}`;
+        btnPrev.disabled = currentIndex === 0; btnNext.disabled = currentIndex === chunks.length - 1;
+      };
+      btnPrev.onclick = () => { if(currentIndex > 0) { currentIndex--; updateQR(); }};
+      btnNext.onclick = () => { if(currentIndex < chunks.length - 1) { currentIndex++; updateQR(); }};
+      setTimeout(updateQR, 100);
+    } else { setTimeout(() => new QRCode(qrDiv, { text: chunks[0], width: 250, height: 250, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L }), 100); }
+    container.appendChild(qrWrap);
   },
 
   async hostCloudRoom(pin) {
@@ -136,11 +239,46 @@ const App = {
     } catch(e) { alert(e.message); App.renderState('IDLE'); }
   },
 
+  async hostManualRoom() {
+    const card = Utils.createElement('div', '', 'card');
+    card.innerHTML = `<h1>Generating Keys...</h1>${animHTML}`;
+    App.container.innerHTML = '<div class="view idle-view"></div>'; App.container.firstChild.appendChild(card);
+
+    setTimeout(async () => {
+      connection = new P2PConnection(App);
+      const offerStr = await connection.generateOffer();
+      const base64 = Utils.encodeBase64Url(offerStr);
+      card.innerHTML = '<h1 class="brand">Offline Room</h1><p>Share this QR to connect</p>';
+      App.renderQRCarousel(card, base64);
+      setTimeout(() => {
+        const btnScan = Utils.createElement('button', 'Provide Answer Code');
+        btnScan.onclick = () => App.renderScannerUI('answer', (decoded) => {
+           const ans = Protocol.validateSignal(Utils.decodeBase64Url(decoded), 'answer');
+           if(ans) connection.acceptAnswer(ans); else { alert("Invalid."); App.renderState('IDLE'); } 
+        });
+        card.appendChild(btnScan);
+      }, 200);
+    }, 100);
+  },
+
+  async handleManualJoin(offerSignal) {
+    const card = Utils.createElement('div', '', 'card');
+    card.innerHTML = `<h1>Securing...</h1>${animHTML}`;
+    App.container.innerHTML = '<div class="view idle-view"></div>'; App.container.firstChild.appendChild(card);
+
+    setTimeout(async () => {
+      connection = new P2PConnection(App);
+      const ansStr = await connection.acceptOfferAndGenerateAnswer(offerSignal);
+      const base64 = Utils.encodeBase64Url(ansStr);
+      card.innerHTML = '<h1 class="brand">Send Answer</h1><p>Scan this back to the Host</p>';
+      App.renderQRCarousel(card, base64);
+    }, 100);
+  },
+
   buildChatView() {
     const tpl = document.getElementById('tpl-chat').content.cloneNode(true);
     App.container.appendChild(tpl);
 
-    // Dice Menu
     const diceBtn = document.getElementById('btn-dice'); const diceMenu = document.getElementById('dice-menu');
     diceBtn.onclick = (e) => { e.stopPropagation(); diceMenu.classList.toggle('active'); };
     document.addEventListener('click', (e) => { if(diceMenu && !diceMenu.contains(e.target) && e.target !== diceBtn) diceMenu.classList.remove('active'); });
@@ -149,7 +287,6 @@ const App = {
     document.getElementById('btn-screen-cast').onclick = () => { diceMenu.classList.remove('active'); connection.toggleScreenCasting(); };
     document.getElementById('btn-chat-settings').onclick = () => { diceMenu.classList.remove('active'); document.getElementById('settings-overlay').classList.remove('hidden'); };
 
-    // Batch File Input
     const fileInput = document.getElementById('file-input');
     document.getElementById('btn-file').onclick = () => { diceMenu.classList.remove('active'); fileInput.click(); };
     fileInput.onchange = (e) => {
@@ -169,7 +306,6 @@ const App = {
       fileInput.value = ''; 
     };
 
-    // Draw Engine
     DrawController.init('chat-canvas', (cmdStr) => connection.sendPayload(cmdStr));
     const drawToolbar = document.getElementById('draw-toolbar');
     document.getElementById('btn-draw-toggle').onclick = () => { diceMenu.classList.remove('active'); DrawController.toggle(!DrawController.isActive); drawToolbar.classList.toggle('hidden', !DrawController.isActive); };
@@ -178,11 +314,10 @@ const App = {
     document.getElementById('btn-draw-clear').onclick = () => DrawController.clear(true);
     document.getElementById('btn-draw-close').onclick = () => { DrawController.toggle(false); drawToolbar.classList.add('hidden'); };
 
-    // Smart Text Input Auto-Resize
     const input = document.getElementById('chat-input'); let ghostTimeout;
     input.addEventListener('input', function() {
       this.style.height = '44px';
-      this.style.height = Math.min(this.scrollHeight, 100) + 'px'; // Max 4 lines
+      this.style.height = Math.min(this.scrollHeight, 100) + 'px'; 
       if (App.settings.ghostTyping && connection) {
         connection.sendPayload(Protocol.createGhostTyping(this.value, true));
         clearTimeout(ghostTimeout); ghostTimeout = setTimeout(() => connection.sendPayload(Protocol.createGhostTyping('', false)), 2000);
@@ -198,12 +333,11 @@ const App = {
       input.value = ''; input.style.height = '44px';
     };
 
-    // Prevent default touch/click from closing the mobile keyboard
+    // Keep mobile keyboard open when sending
     sendBtn.addEventListener('pointerdown', (e) => e.preventDefault()); 
     sendBtn.onclick = (e) => { e.preventDefault(); sendMsg(); };
     input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } };
     
-    // Receipt Observer
     App.receiptObserver = new IntersectionObserver((entries) => {
       entries.forEach(ent => {
         if (ent.isIntersecting && ent.target.dataset.status === 'deliv') {
@@ -254,6 +388,7 @@ const App = {
     else if (msg.type === Protocol.TYPES.FILE_START) App.onIncomingFileStart(msg);
     else if (msg.type === Protocol.TYPES.FILE_END) App.onIncomingFileEnd(msg.id);
     else if (msg.type === Protocol.TYPES.FILE_CANCEL) App.onIncomingFileEnd(msg.id, true);
+    else if (msg.type === Protocol.TYPES.RECEIPT) App.updateReceipt(msg.id, msg.status);
     else if (msg.type.startsWith('screen_')) connection.handleScreenSignal(msg);
   },
 
@@ -264,6 +399,12 @@ const App = {
     wrap.innerHTML = `<div class="msg-bubble">${msg.text}</div><div class="msg-meta">${new Date(msg.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}${isSelf ? `<span class="msg-ticks" id="tick-${msg.id}"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg></span>` : ''}</div>`;
     log.appendChild(wrap); log.scrollTop = log.scrollHeight;
     if (!isSelf) { wrap.dataset.status = 'deliv'; App.receiptObserver.observe(wrap); }
+  },
+
+  updateReceipt(id, status) {
+    const tick = document.getElementById(`tick-${id}`); if(!tick) return;
+    if(status === 1) tick.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M18 6l-9 11-4-5"/><path d="M22 6l-9 11"/></svg>';
+    if(status === 2) tick.classList.add('seen');
   },
 
   async onIncomingFileStart(msg) {
