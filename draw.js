@@ -4,12 +4,12 @@ const DrawController = {
   canvas: null, ctx: null, 
   isActive: false, isDrawing: false,
   color: '#ff0000', width: 3,
-  myStrokes: [], peerStrokes: [], currentPoints: [],
+  myStrokes: [], peerStrokes: [], 
+  activeStrokeId: null, activeStroke: null,
   onSendCommand: null,
 
   init(canvasId, onSendCommand) {
     this.canvas = document.getElementById(canvasId);
-    // FIX: Removed { desynchronized: true } to prevent mobile GPU black-screen rendering bugs
     this.ctx = this.canvas.getContext('2d');
     this.onSendCommand = onSendCommand;
     
@@ -20,12 +20,10 @@ const DrawController = {
     const move = (e) => this.draw(this.getPos(e));
     const end = () => this.endDraw();
     
-    // Mouse
     this.canvas.addEventListener('mousedown', start);
     this.canvas.addEventListener('mousemove', move);
     this.canvas.addEventListener('mouseup', end);
     this.canvas.addEventListener('mouseout', end);
-    // Touch
     this.canvas.addEventListener('touchstart', (e) => { if(this.isActive) e.preventDefault(); start(e.touches[0]); }, { passive: false });
     this.canvas.addEventListener('touchmove', (e) => { if(this.isActive) e.preventDefault(); move(e.touches[0]); }, { passive: false });
     this.canvas.addEventListener('touchend', end);
@@ -48,54 +46,86 @@ const DrawController = {
 
   getPos(e) {
     const rect = this.canvas.getBoundingClientRect();
-    // Calculate proportional vectors (0.0 to 1.0)
     return { x: (e.clientX - rect.left) / this.canvas.width, y: (e.clientY - rect.top) / this.canvas.height };
   },
 
   startDraw(pos) {
     if (!this.isActive) return;
     this.isDrawing = true;
-    this.currentPoints = [pos];
+    this.activeStrokeId = Utils.generateId();
+    const pt = {x: pos.x, y: pos.y};
+    
+    this.activeStroke = { id: this.activeStrokeId, c: this.color, w: this.width, p: [pt] };
+    this.myStrokes.push(this.activeStroke);
+    
+    if (this.onSendCommand) {
+      this.onSendCommand(JSON.stringify({v: 2, type: Protocol.TYPES.DRAW_START, id: this.activeStrokeId, c: this.color, w: this.width, p: pt}));
+    }
   },
 
   draw(pos) {
     if (!this.isDrawing) return;
-    this.currentPoints.push(pos);
+    const pt = {x: pos.x, y: pos.y};
+    this.activeStroke.p.push(pt);
     
-    // Immediate local feedback
     this.ctx.beginPath();
-    const prev = this.currentPoints[this.currentPoints.length - 2];
+    const prev = this.activeStroke.p[this.activeStroke.p.length - 2];
     this.ctx.moveTo(prev.x * this.canvas.width, prev.y * this.canvas.height);
-    this.ctx.lineTo(pos.x * this.canvas.width, pos.y * this.canvas.height);
+    this.ctx.lineTo(pt.x * this.canvas.width, pt.y * this.canvas.height);
     this.ctx.strokeStyle = this.color;
     this.ctx.lineWidth = this.width;
     this.ctx.lineCap = 'round';
     this.ctx.lineJoin = 'round';
     this.ctx.stroke();
+
+    if (this.onSendCommand) {
+       this.onSendCommand(JSON.stringify({v: 2, type: Protocol.TYPES.DRAW_PT, id: this.activeStrokeId, p: pt}));
+    }
   },
 
   endDraw() {
     if (!this.isDrawing) return;
     this.isDrawing = false;
-    if (this.currentPoints.length > 1) {
-      const stroke = { id: Utils.generateId(), c: this.color, w: this.width, p: this.currentPoints };
-      this.myStrokes.push(stroke);
-      if (this.onSendCommand) this.onSendCommand(Protocol.createDrawStroke(stroke));
-    }
-    this.currentPoints = [];
   },
 
   handleNetworkCommand(msg) {
-    if (msg.type === Protocol.TYPES.DRAW) {
-      this.peerStrokes.push(msg.stroke);
-      this.render();
+    if (msg.type === Protocol.TYPES.DRAW_START) {
+      const stroke = { id: msg.id, c: msg.c, w: msg.w, p: [msg.p] };
+      this.peerStrokes.push(stroke);
+    } else if (msg.type === Protocol.TYPES.DRAW_PT) {
+      const s = this.peerStrokes.find(st => st.id === msg.id);
+      if (s) {
+        s.p.push(msg.p);
+        this.ctx.beginPath();
+        const prev = s.p[s.p.length - 2];
+        this.ctx.moveTo(prev.x * this.canvas.width, prev.y * this.canvas.height);
+        this.ctx.lineTo(msg.p.x * this.canvas.width, msg.p.y * this.canvas.height);
+        this.ctx.strokeStyle = s.c;
+        this.ctx.lineWidth = s.w;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        this.ctx.stroke();
+      }
     } else if (msg.type === Protocol.TYPES.DRAW_UNDO) {
       this.peerStrokes.pop();
       this.render();
-    } else if (msg.type === Protocol.TYPES.DRAW_CLEAR) {
-      this.peerStrokes = [];
-      this.render();
     }
+  },
+
+  // Flattens the canvas into a chat image bubble and gracefully removes it from the top layer.
+  sendAsMessage(isPeer = false) {
+    if (this.myStrokes.length === 0 && this.peerStrokes.length === 0) {
+      this.clear(false);
+      return;
+    }
+    const dataUrl = this.canvas.toDataURL('image/png');
+    App.renderDrawingMessage(dataUrl, !isPeer);
+    
+    if (!isPeer && this.onSendCommand) {
+        this.onSendCommand(JSON.stringify({v: 2, type: Protocol.TYPES.DRAW_FINISH}));
+    }
+    
+    this.clear(false); 
   },
   
   undo(isSelf) {
@@ -104,8 +134,12 @@ const DrawController = {
   },
 
   clear(isSelf) {
-    if (isSelf) { this.myStrokes = []; if (this.onSendCommand) this.onSendCommand(Protocol.createDrawCommand(Protocol.TYPES.DRAW_CLEAR)); }
+    this.myStrokes = [];
+    this.peerStrokes = [];
     this.render();
+    this.toggle(false);
+    const tb = document.getElementById('draw-toolbar');
+    if(tb) tb.classList.add('hidden');
   },
 
   render() {
