@@ -30,26 +30,50 @@ function extractCode(text) {
 const Synthesizer = {
   ctx: null,
   init() { if(!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); },
+  
+  // Sent Sound: A quick, crisp, subtle 'tick'
   playPop() {
     if(!this.ctx || !App.settings.sound) return;
-    const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator(); 
+    const gain = this.ctx.createGain();
     osc.connect(gain); gain.connect(this.ctx.destination);
-    osc.type = 'sine'; osc.frequency.setValueAtTime(600, this.ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.1);
-    gain.gain.setValueAtTime(0, this.ctx.currentTime); gain.gain.linearRampToValueAtTime(0.5, this.ctx.currentTime + 0.05); gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.1);
-    osc.start(this.ctx.currentTime); osc.stop(this.ctx.currentTime + 0.1);
+    
+    osc.type = 'sine'; 
+    osc.frequency.setValueAtTime(800, t);
+    osc.frequency.exponentialRampToValueAtTime(400, t + 0.07);
+    
+    gain.gain.setValueAtTime(0, t); 
+    gain.gain.linearRampToValueAtTime(0.15, t + 0.01); 
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.07);
+    
+    osc.start(t); osc.stop(t + 0.1);
   },
+
+  // Received Sound: A soft, clean two-tone 'da-ding' chime
   playSwoosh() {
     if(!this.ctx || !App.settings.sound) return;
-    const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator(); 
+    const gain = this.ctx.createGain();
     osc.connect(gain); gain.connect(this.ctx.destination);
-    osc.type = 'triangle'; osc.frequency.setValueAtTime(300, this.ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.2);
-    gain.gain.setValueAtTime(0.3, this.ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
-    osc.start(this.ctx.currentTime); osc.stop(this.ctx.currentTime + 0.2);
+    
+    osc.type = 'sine'; 
+    // First note (lower)
+    osc.frequency.setValueAtTime(650, t);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.15, t + 0.02);
+    gain.gain.linearRampToValueAtTime(0, t + 0.08);
+    
+    // Second note (higher)
+    osc.frequency.setValueAtTime(850, t + 0.09);
+    gain.gain.setValueAtTime(0, t + 0.09);
+    gain.gain.linearRampToValueAtTime(0.15, t + 0.11);
+    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+    
+    osc.start(t); osc.stop(t + 0.35);
   }
 };
-
 const App = {
   container: document.getElementById('app-container'),
   settings: { darkMode: false, useCloud: true, qrChunks: 3, ghostTyping: false, sound: true },
