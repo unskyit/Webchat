@@ -1,4 +1,4 @@
-// app.js - Refined Layout Hooks, Persistent Keyboard & Connection Media
+// app.js - Layout Hooks, Persistent Keyboard & Connection Engine
 
 const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3dP8CzVtTl1JCrNyibhOypH5lKyB7adpK6pBMUjk69WKruStFLbpwQ/exec"; 
 let connection = null;
@@ -69,8 +69,8 @@ const App = {
     
     const headerActions = document.getElementById('header-actions');
     if (state === 'IDLE') {
-      if(window.DrawController) DrawController.clear(false); // Wipe ink on exit
-      headerActions.innerHTML = `<button id="btn-settings-head" class="icon-btn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>`;
+      if(window.DrawController) DrawController.clear(false); 
+      headerActions.innerHTML = `<button id="btn-settings-head" class="icon-btn" title="Settings"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>`;
       document.getElementById('btn-settings-head').onclick = () => document.getElementById('settings-overlay').classList.remove('hidden');
       App.buildIdleView();
     }
@@ -160,7 +160,7 @@ const App = {
       fileInput.value = ''; 
     };
 
-    // Draw
+    // Draw Engine
     DrawController.init('chat-canvas', (cmdStr) => connection.sendPayload(cmdStr));
     const drawToolbar = document.getElementById('draw-toolbar');
     document.getElementById('btn-draw-toggle').onclick = () => { diceMenu.classList.remove('active'); DrawController.toggle(!DrawController.isActive); drawToolbar.classList.toggle('hidden', !DrawController.isActive); };
@@ -169,19 +169,16 @@ const App = {
     document.getElementById('btn-draw-clear').onclick = () => DrawController.clear(true);
     document.getElementById('btn-draw-close').onclick = () => { DrawController.toggle(false); drawToolbar.classList.add('hidden'); };
 
-    // Smart Text Input Auto-Resize & Focus Lock
+    // 4-Line Smart Auto-Resize Textarea
     const input = document.getElementById('chat-input'); let ghostTimeout;
-    
-    input.oninput = () => {
-      // Dynamic Height Calculation (Max 4 lines approx 110px)
-      input.style.height = '44px';
-      input.style.height = Math.min(input.scrollHeight, 110) + 'px';
-      
+    input.addEventListener('input', function() {
+      this.style.height = '44px';
+      this.style.height = Math.min(this.scrollHeight, 100) + 'px'; // Max 4 lines (100px)
       if (App.settings.ghostTyping && connection) {
-        connection.sendPayload(Protocol.createGhostTyping(input.value, true));
+        connection.sendPayload(Protocol.createGhostTyping(this.value, true));
         clearTimeout(ghostTimeout); ghostTimeout = setTimeout(() => connection.sendPayload(Protocol.createGhostTyping('', false)), 2000);
       }
-    };
+    });
     
     const sendBtn = document.getElementById('btn-send');
     const sendMsg = () => {
@@ -192,9 +189,11 @@ const App = {
       input.value = ''; input.style.height = '44px'; // Reset height
     };
 
-    // CRITICAL: Prevent default mousedown to stop the keyboard from hiding
+    // Prevent default touch/click from closing the mobile keyboard
     sendBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    sendBtn.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
     sendBtn.onclick = () => { sendMsg(); input.focus(); };
+    
     input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } };
     
     // Receipt Observer
@@ -331,9 +330,10 @@ const App = {
     let cont = document.getElementById('media-container');
     cont.classList.remove('hidden');
     let video = document.getElementById('remote-screen');
+    // Ensure playsInline is properly attached for mobile iOS rendering
     if (!video) {
       video = document.createElement('video'); video.id = 'remote-screen';
-      video.autoplay = true; video.playsInline = true;
+      video.autoplay = true; video.playsInline = true; video.muted = true;
       cont.appendChild(video);
     }
     video.srcObject = stream;
