@@ -1,7 +1,15 @@
-// app.js - Optimized Architecture, Fixes & Hardware Routing
+// app.js - Refined Layout Hooks, Persistent Keyboard & Connection Media
 
 const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3dP8CzVtTl1JCrNyibhOypH5lKyB7adpK6pBMUjk69WKruStFLbpwQ/exec"; 
 let connection = null;
+
+const animHTML = `
+  <div class="link-animation">
+    <div class="orb"></div>
+    <div class="beam-container"><div class="beam"></div></div>
+    <div class="orb"></div>
+  </div>
+`;
 
 const Synthesizer = {
   ctx: null,
@@ -34,15 +42,6 @@ const App = {
   activeIncomingFile: null, activeBatches: {},
 
   init() {
-    // Exact viewport fix for mobile software keyboards
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', () => {
-        document.body.style.height = window.visualViewport.height + 'px';
-        const log = document.getElementById('chat-log');
-        if(log) log.scrollTop = log.scrollHeight;
-      });
-    }
-
     window.addEventListener('popstate', (e) => {
       if (e.state && e.state.view) App.renderState(e.state.view, false);
       else App.renderState('IDLE', false);
@@ -68,16 +67,15 @@ const App = {
     if (pushHistory) history.pushState({ view: state }, '', `#${state}`);
     App.container.innerHTML = '';
     
-    // Header UI Switch
     const headerActions = document.getElementById('header-actions');
     if (state === 'IDLE') {
-      if(DrawController) DrawController.clear(false); // Wipe ink on exit
+      if(window.DrawController) DrawController.clear(false); // Wipe ink on exit
       headerActions.innerHTML = `<button id="btn-settings-head" class="icon-btn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>`;
       document.getElementById('btn-settings-head').onclick = () => document.getElementById('settings-overlay').classList.remove('hidden');
       App.buildIdleView();
     }
     else if (state === 'CONNECTED') {
-      headerActions.innerHTML = `<button id="btn-end-head" class="btn-danger">End Session</button>`;
+      headerActions.innerHTML = `<button id="btn-end-head" class="btn-danger">End Chat</button>`;
       document.getElementById('btn-end-head').onclick = () => { if(connection) connection.destroy(); App.renderState('IDLE'); };
       App.buildChatView();
     }
@@ -99,7 +97,7 @@ const App = {
 
   async hostCloudRoom(pin) {
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = `<h1 class="brand">Room Created</h1><h2 class="otp-input">${pin}</h2><p>Waiting for friend...</p>`;
+    card.innerHTML = `<h1 class="brand">Room Created</h1><h2 class="otp-input">${pin}</h2>${animHTML}<p>Waiting for friend...</p>`;
     App.container.innerHTML = '<div class="view"></div>'; App.container.firstChild.appendChild(card);
     
     connection = new P2PConnection(App);
@@ -116,7 +114,7 @@ const App = {
 
   async joinCloudRoom(pin) {
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = `<h1>Connecting...</h1><p>PIN: ${pin}</p>`;
+    card.innerHTML = `<h1>Connecting...</h1><p>PIN: ${pin}</p>${animHTML}`;
     App.container.innerHTML = '<div class="view"></div>'; App.container.firstChild.appendChild(card);
     
     connection = new P2PConnection(App);
@@ -149,12 +147,10 @@ const App = {
       if(e.target.files.length && connection) {
         const batchId = 'b-' + Utils.generateId();
         App.activeBatches[batchId] = { count: e.target.files.length, current: 0, ui: null };
-        
-        // Setup Batch UI immediately if > 1 file
         if (e.target.files.length > 1) {
           const log = document.getElementById('chat-log');
           const wrap = Utils.createElement('div', '', 'msg-wrap self'); wrap.id = 'batch-' + batchId;
-          wrap.innerHTML = `<div class="msg-bubble batch-folder"><div class="batch-header">📁 Sending ${e.target.files.length} Files <span style="font-size:12px;">▼</span></div><div class="batch-list" id="blist-${batchId}"></div></div>`;
+          wrap.innerHTML = `<div class="msg-bubble batch-folder"><div class="batch-header">📁 Sending ${e.target.files.length} Files <span>▼</span></div><div class="batch-list" id="blist-${batchId}"></div></div>`;
           wrap.querySelector('.batch-header').onclick = (ev) => ev.currentTarget.nextElementSibling.classList.toggle('open');
           log.appendChild(wrap); log.scrollTop = log.scrollHeight;
           App.activeBatches[batchId].ui = document.getElementById(`blist-${batchId}`);
@@ -173,25 +169,43 @@ const App = {
     document.getElementById('btn-draw-clear').onclick = () => DrawController.clear(true);
     document.getElementById('btn-draw-close').onclick = () => { DrawController.toggle(false); drawToolbar.classList.add('hidden'); };
 
-    // Input
+    // Smart Text Input Auto-Resize & Focus Lock
     const input = document.getElementById('chat-input'); let ghostTimeout;
+    
     input.oninput = () => {
+      // Dynamic Height Calculation (Max 4 lines approx 110px)
+      input.style.height = '44px';
+      input.style.height = Math.min(input.scrollHeight, 110) + 'px';
+      
       if (App.settings.ghostTyping && connection) {
         connection.sendPayload(Protocol.createGhostTyping(input.value, true));
         clearTimeout(ghostTimeout); ghostTimeout = setTimeout(() => connection.sendPayload(Protocol.createGhostTyping('', false)), 2000);
       }
     };
     
+    const sendBtn = document.getElementById('btn-send');
     const sendMsg = () => {
       const txt = input.value.trim(); if (!txt || !connection) return;
       const msg = Protocol.createChatMessage(txt); connection.sendPayload(msg);
       if(App.settings.ghostTyping) connection.sendPayload(Protocol.createGhostTyping('', false));
-      App.renderMessage(JSON.parse(msg), true); Synthesizer.playPop(); input.value = '';
+      App.renderMessage(JSON.parse(msg), true); Synthesizer.playPop(); 
+      input.value = ''; input.style.height = '44px'; // Reset height
     };
-    document.getElementById('btn-send').onclick = sendMsg;
+
+    // CRITICAL: Prevent default mousedown to stop the keyboard from hiding
+    sendBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    sendBtn.onclick = () => { sendMsg(); input.focus(); };
     input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } };
     
-    input.onfocus = () => { setTimeout(() => { const log = document.getElementById('chat-log'); if(log) log.scrollTop = log.scrollHeight; }, 100); };
+    // Receipt Observer
+    App.receiptObserver = new IntersectionObserver((entries) => {
+      entries.forEach(ent => {
+        if (ent.isIntersecting && ent.target.dataset.status === 'deliv') {
+          ent.target.dataset.status = 'seen';
+          if(connection) connection.sendPayload(Protocol.createReceipt(ent.target.id, 2));
+        }
+      });
+    }, { root: document.getElementById('chat-log'), threshold: 0.5 });
   },
 
   onStateChange(status, msg) {
@@ -234,25 +248,27 @@ const App = {
     else if (msg.type === Protocol.TYPES.FILE_START) App.onIncomingFileStart(msg);
     else if (msg.type === Protocol.TYPES.FILE_END) App.onIncomingFileEnd(msg.id);
     else if (msg.type === Protocol.TYPES.FILE_CANCEL) App.onIncomingFileEnd(msg.id, true);
+    else if (msg.type.startsWith('screen_')) connection.handleScreenSignal(msg);
   },
 
   renderMessage(msg, isSelf) {
     const log = document.getElementById('chat-log');
     const wrap = Utils.createElement('div', '', `msg-wrap ${isSelf ? 'self' : 'peer'}`);
-    wrap.innerHTML = `<div class="msg-bubble">${msg.text}</div><div class="msg-meta">${new Date(msg.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>`;
+    wrap.id = msg.id;
+    wrap.innerHTML = `<div class="msg-bubble">${msg.text}</div><div class="msg-meta">${new Date(msg.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}${isSelf ? `<span class="msg-ticks" id="tick-${msg.id}"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg></span>` : ''}</div>`;
     log.appendChild(wrap); log.scrollTop = log.scrollHeight;
+    if (!isSelf) { wrap.dataset.status = 'deliv'; App.receiptObserver.observe(wrap); }
   },
 
   async onIncomingFileStart(msg) {
     let stream = null;
     if (FileSystem.sessionFolder) stream = await FileSystem.createWritable(msg.name);
     
-    // Auto-create batch folder UI for receiver if batch info exists
     if(msg.bId && msg.bTot > 1 && !App.activeBatches[msg.bId]) {
       App.activeBatches[msg.bId] = { count: msg.bTot, current: 0, ui: null };
       const log = document.getElementById('chat-log');
       const wrap = Utils.createElement('div', '', 'msg-wrap peer'); wrap.id = 'batch-' + msg.bId;
-      wrap.innerHTML = `<div class="msg-bubble batch-folder"><div class="batch-header">📁 Receiving ${msg.bTot} Files <span style="font-size:12px;">▼</span></div><div class="batch-list" id="blist-${msg.bId}"></div></div>`;
+      wrap.innerHTML = `<div class="msg-bubble batch-folder"><div class="batch-header">📁 Receiving ${msg.bTot} Files <span>▼</span></div><div class="batch-list" id="blist-${msg.bId}"></div></div>`;
       wrap.querySelector('.batch-header').onclick = (ev) => ev.currentTarget.nextElementSibling.classList.toggle('open');
       log.appendChild(wrap); log.scrollTop = log.scrollHeight;
       App.activeBatches[msg.bId].ui = document.getElementById(`blist-${msg.bId}`);
@@ -272,14 +288,10 @@ const App = {
   async onIncomingFileEnd(id, aborted = false) {
     const f = App.activeIncomingFile; if(!f || f.id !== id) return;
     let url = null;
-    
     if (f.stream) await f.stream.close();
     else if (!aborted) {
-      const blob = new Blob(f.chunks, {type: f.mime});
-      url = URL.createObjectURL(blob);
-      if(!f.mime.startsWith('image/') && !f.mime.startsWith('video/')) {
-        const a = document.createElement('a'); a.href = url; a.download = f.name; a.click();
-      }
+      const blob = new Blob(f.chunks, {type: f.mime}); url = URL.createObjectURL(blob);
+      if(!f.mime.startsWith('image/') && !f.mime.startsWith('video/')) { const a = document.createElement('a'); a.href = url; a.download = f.name; a.click(); }
     }
     App.onFileTransferComplete(id, url, !aborted, f.mime);
     App.activeIncomingFile = null;
@@ -287,26 +299,12 @@ const App = {
 
   onFileTransferStart(id, name, size, isUpload, batchId = null) {
     const log = document.getElementById('chat-log');
-    const boxHTML = `
-      <div class="file-row">
-        <strong style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80%;">${name}</strong>
-        ${isUpload ? `<button class="btn-cancel" onclick="connection.cancelActiveTransfer()" title="Cancel">✕</button>` : ''}
-      </div>
-      <div class="file-row"><small>${(size/(1024*1024)).toFixed(2)} MB</small><small id="text-${id}">${isUpload ? 'Sending' : 'Receiving'}...</small></div>
-      <div class="file-progress-bg"><div id="prog-${id}" class="file-progress-fill"></div></div>
-    `;
-
-    const el = Utils.createElement('div', '', 'msg-bubble file-bubble');
-    el.id = 'ui-f-' + id; el.innerHTML = boxHTML;
+    const boxHTML = `<div class="file-row"><strong style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80%;">${name}</strong>${isUpload ? `<button class="btn-cancel" onclick="connection.cancelActiveTransfer()" title="Cancel">✕</button>` : ''}</div><div class="file-row"><small>${(size/(1024*1024)).toFixed(2)} MB</small><small id="text-${id}">${isUpload ? 'Sending' : 'Receiving'}...</small></div><div class="file-progress-bg"><div id="prog-${id}" class="file-progress-fill"></div></div>`;
+    const el = Utils.createElement('div', '', 'msg-bubble file-bubble'); el.id = 'ui-f-' + id; el.innerHTML = boxHTML;
     
     const target = (batchId && App.activeBatches[batchId]?.ui) ? App.activeBatches[batchId].ui : log;
-    
-    if (target === log) {
-      const wrap = Utils.createElement('div', '', `msg-wrap ${isUpload ? 'self' : 'peer'}`);
-      wrap.appendChild(el); target.appendChild(wrap);
-    } else {
-      el.style.width = '100%'; el.style.border = '1px solid var(--border)'; target.appendChild(el); target.classList.add('open');
-    }
+    if (target === log) { const wrap = Utils.createElement('div', '', `msg-wrap ${isUpload ? 'self' : 'peer'}`); wrap.appendChild(el); target.appendChild(wrap); } 
+    else { el.style.width = '100%'; el.style.border = '1px solid var(--border)'; target.appendChild(el); target.classList.add('open'); }
     log.scrollTop = log.scrollHeight;
   },
 
@@ -316,26 +314,29 @@ const App = {
   },
 
   onFileTransferComplete(id, url, success, mimeType = '') {
-    const box = document.getElementById(`ui-f-${id}`);
-    if(!box) return;
+    const box = document.getElementById(`ui-f-${id}`); if(!box) return;
     const txt = document.getElementById(`text-${id}`); const bar = document.getElementById(`prog-${id}`);
     if(success && bar) bar.style.width = '100%';
-    
     if(!success) { if(txt) txt.textContent = '❌ Cancelled'; return; }
     if(txt) txt.textContent = FileSystem.sessionFolder ? 'Saved ✅' : 'Complete ✅';
 
     const cancelBtn = box.querySelector('.btn-cancel'); if(cancelBtn) cancelBtn.remove();
-
-    // Media Previews
     if (url) {
-      if (mimeType.startsWith('image/')) {
-        const img = document.createElement('img'); img.src = url; img.className = 'media-preview'; img.onclick = () => window.open(url);
-        box.insertBefore(img, box.firstChild);
-      } else if (mimeType.startsWith('video/')) {
-        const vid = document.createElement('video'); vid.src = url; vid.className = 'media-preview'; vid.controls = true; vid.muted = true;
-        box.insertBefore(vid, box.firstChild);
-      }
+      if (mimeType.startsWith('image/')) { const img = document.createElement('img'); img.src = url; img.className = 'media-preview'; img.onclick = () => window.open(url); box.insertBefore(img, box.firstChild); } 
+      else if (mimeType.startsWith('video/')) { const vid = document.createElement('video'); vid.src = url; vid.className = 'media-preview'; vid.controls = true; vid.muted = true; box.insertBefore(vid, box.firstChild); }
     }
+  },
+
+  onScreenCastReceived(stream) {
+    let cont = document.getElementById('media-container');
+    cont.classList.remove('hidden');
+    let video = document.getElementById('remote-screen');
+    if (!video) {
+      video = document.createElement('video'); video.id = 'remote-screen';
+      video.autoplay = true; video.playsInline = true;
+      cont.appendChild(video);
+    }
+    video.srcObject = stream;
   }
 };
 
