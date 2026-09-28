@@ -27,7 +27,8 @@ const FileSystem = {
     try {
       const fileHandle = await this.sessionFolder.getFileHandle(filename, { create: true });
       // Returns a FileSystemWritableFileStream to pipe chunks directly to disk
-      return await fileHandle.createWritable();
+      const stream = await fileHandle.createWritable();
+      return { stream, fileHandle }; // FIX: Return handle to generate media preview later
     } catch (e) {
       console.error("Failed to create writable stream:", e);
       return null;
