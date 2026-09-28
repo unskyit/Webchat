@@ -31,7 +31,6 @@ const Synthesizer = {
   ctx: null,
   init() { if(!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); },
   
-  // Sent Sound: A quick, crisp, subtle 'tick'
   playPop() {
     if(!this.ctx || !App.settings.sound) return;
     const t = this.ctx.currentTime;
@@ -50,7 +49,6 @@ const Synthesizer = {
     osc.start(t); osc.stop(t + 0.1);
   },
 
-  // Received Sound: A soft, clean two-tone 'da-ding' chime
   playSwoosh() {
     if(!this.ctx || !App.settings.sound) return;
     const t = this.ctx.currentTime;
@@ -59,13 +57,11 @@ const Synthesizer = {
     osc.connect(gain); gain.connect(this.ctx.destination);
     
     osc.type = 'sine'; 
-    // First note (lower)
     osc.frequency.setValueAtTime(650, t);
     gain.gain.setValueAtTime(0, t);
     gain.gain.linearRampToValueAtTime(0.15, t + 0.02);
     gain.gain.linearRampToValueAtTime(0, t + 0.08);
     
-    // Second note (higher)
     osc.frequency.setValueAtTime(850, t + 0.09);
     gain.gain.setValueAtTime(0, t + 0.09);
     gain.gain.linearRampToValueAtTime(0.15, t + 0.11);
@@ -228,7 +224,9 @@ const App = {
 
   renderQRCarousel(container, base64Payload) {
     const chunks = createQRChunks(base64Payload); let currentIndex = 0;
-    const qrWrap = Utils.createElement('div'); const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; qrWrap.appendChild(qrDiv);
+    const qrWrap = Utils.createElement('div', '', 'qr-wrapper'); 
+    const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; 
+    qrWrap.appendChild(qrDiv);
 
     if(chunks.length > 1) {
       const navWrap = Utils.createElement('div', '', 'qr-carousel');
@@ -261,7 +259,11 @@ const App = {
       const poll = setInterval(async () => {
         const res = await fetch(`${APP_SCRIPT_URL}?room=${pin}&type=get_answer`);
         const data = await res.json();
-        if (data.payload) { clearInterval(poll); const answerSignal = Protocol.validateSignal(data.payload, 'answer'); if (answerSignal) connection.acceptAnswer(answerSignal); }
+        if (data.payload) { 
+          clearInterval(poll); 
+          const answerSignal = Protocol.validateSignal(data.payload, 'answer'); 
+          if (answerSignal) connection.acceptAnswer(answerSignal); 
+        }
       }, 3000);
     } catch(e) { App.showAlert("Network failed. Ensure you are connected to the internet.", "Network Error"); App.renderState('IDLE'); }
   },
@@ -276,7 +278,12 @@ const App = {
       const res = await fetch(`${APP_SCRIPT_URL}?room=${pin}&type=get_offer`);
       const data = await res.json();
       if (!data.payload) throw new Error("Room not found.");
-      const answerStr = await connection.acceptOfferAndGenerateAnswer(Protocol.validateSignal(data.payload, 'offer'));
+      
+      // Safety validation check implemented to prevent 'reading i from null' crash[cite: 1, 2]
+      const offerSignal = Protocol.validateSignal(data.payload, 'offer');
+      if (!offerSignal) throw new Error("Room offer has expired or is invalid.");
+
+      const answerStr = await connection.acceptOfferAndGenerateAnswer(offerSignal);
       await fetch(APP_SCRIPT_URL, { method: 'POST', body: JSON.stringify({ room: pin, type: 'answer', payload: answerStr }) });
     } catch(e) { App.showAlert(e.message, "Join Failed"); App.renderState('IDLE'); }
   },
@@ -304,6 +311,7 @@ const App = {
   },
 
   async handleManualJoin(offerSignal) {
+    if(!offerSignal) return;
     const card = Utils.createElement('div', '', 'card');
     card.innerHTML = `<h1>Securing...</h1>${animHTML}`;
     App.container.innerHTML = '<div class="view idle-view"></div>'; App.container.firstChild.appendChild(card);
@@ -399,7 +407,20 @@ const App = {
 
     sendBtn.addEventListener('pointerdown', (e) => e.preventDefault()); 
     sendBtn.onclick = (e) => { e.preventDefault(); sendMsg(); };
-    input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } };
+
+    // Device checks implemented to dictate enter key behavior[cite: 2]
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
+    input.onkeydown = (e) => { 
+      if (e.key === 'Enter' && !e.shiftKey) { 
+        if (isMobile) {
+          // Allows standard mobile return functionality.
+          return;
+        } else {
+          e.preventDefault(); 
+          sendMsg(); 
+        }
+      } 
+    };
     
     App.receiptObserver = new IntersectionObserver((entries) => {
       entries.forEach(ent => {
@@ -447,7 +468,6 @@ const App = {
       if (msg.active && msg.text) { cont.classList.remove('hidden'); txt.textContent = msg.text; document.getElementById('chat-log').scrollTop = document.getElementById('chat-log').scrollHeight; } 
       else { cont.classList.add('hidden'); txt.textContent = ''; }
     }
-    // Fixed matching types for drawing based on original standard
     else if ([Protocol.TYPES.DRAW_START, Protocol.TYPES.DRAW_PT, Protocol.TYPES.DRAW_UNDO].includes(msg.type)) DrawController.handleNetworkCommand(msg);
     else if (msg.type === Protocol.TYPES.DRAW_FINISH) DrawController.sendAsMessage(true);
     else if (msg.type === Protocol.TYPES.FILE_START) App.onIncomingFileStart(msg);
@@ -466,7 +486,6 @@ const App = {
     if (!isSelf) { wrap.dataset.status = 'deliv'; App.receiptObserver.observe(wrap); }
   },
 
-  // Restored method needed to render finished canvases inside the chat
   renderDrawingMessage(dataUrl, isSelf) {
     const log = document.getElementById('chat-log');
     const wrap = Utils.createElement('div', '', `msg-wrap ${isSelf ? 'self' : 'peer'}`);
@@ -487,7 +506,6 @@ const App = {
     if (FileSystem.sessionFolder) {
       const res = await FileSystem.createWritable(msg.name);
       if (res) { 
-        // Robust assignment preventing crash if `createWritable` only returns the stream
         stream = res.stream || res; 
         fileHandle = res.fileHandle || null; 
       }
@@ -531,7 +549,7 @@ const App = {
       }
     }
     else if (!aborted) {
-      const blob = new Blob(f.chunks, {type: f.mime}); url = URL.createObjectURL(blob);
+      const blob = new Blob(f.chunks, {type: f.mime || 'application/octet-stream'}); url = URL.createObjectURL(blob);
       if(!f.mime.startsWith('image/') && !f.mime.startsWith('video/') && !f.mime.startsWith('audio/')) { 
          const a = document.createElement('a'); a.href = url; a.download = f.name; a.click(); 
       }
