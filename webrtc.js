@@ -165,7 +165,8 @@ class P2PConnection {
     const item = this.fileQueue.shift();
     const fileId = 'f-' + Utils.generateId();
     this.sendPayload(Protocol.createFileHeader(item.file, fileId, item.bId, item.bTot));
-    this.app.onFileTransferStart(fileId, item.file.name, item.file.size, true, item.bId);
+    // FIX: Pass the actual file object as the last argument to render a preview on sender side
+    this.app.onFileTransferStart(fileId, item.file.name, item.file.size, true, item.bId, item.file);
 
     const chunkSize = 65536; let offset = 0;
     this.activeTransfer = { id: fileId, aborted: false };
