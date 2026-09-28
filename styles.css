@@ -37,17 +37,17 @@ body.dark-mode {
 
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
-/* Custom Clean Scrollbar */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(134, 150, 160, 0.3); border-radius: 10px; }
 .dark-mode ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); }
 
-/* Bulletproof Layout Lock */
-body, html { 
+/* THE FIX: Pin HTML & Body strictly to the viewport corners to kill black gaps */
+html { background-color: var(--bg-base); }
+body { 
   font-family: var(--font-sans); background-color: var(--bg-base); color: var(--text-main); 
-  width: 100%; height: 100%; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  overflow: hidden; display: flex; flex-direction: column;
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  width: 100%; height: 100%; overflow: hidden; display: flex; flex-direction: column;
 }
 
 .app-header { background: var(--bg-card); padding: calc(12px + var(--safe-top)) 20px 12px; border-bottom: 1px solid var(--border); z-index: 10; flex-shrink: 0; }
@@ -71,7 +71,6 @@ button { background-color: var(--primary); color: #ffffff; border: none; border-
 button.secondary { background-color: var(--bg-base); color: var(--text-main); border: 1px solid var(--border); }
 .btn-danger { background: transparent; color: #f15c6d; border: 1px solid #f15c6d; padding: 6px 14px; margin: 0; width: auto; font-size: 0.9rem;}
 
-/* Settings Overlay */
 #settings-overlay { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 100; padding: 20px;}
 .settings-card { background: var(--bg-card); padding: 24px; border-radius: var(--radius); width: 100%; max-width: 400px; border: 1px solid var(--border); }
 .setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-weight: 500; gap: 15px;}
@@ -83,7 +82,6 @@ button.secondary { background-color: var(--bg-base); color: var(--text-main); bo
 .metric-row strong { color: var(--text-main); }
 #data-counter { font-weight: bold; color: var(--primary); font-size: 1rem; margin-top: 4px; }
 
-/* Switches */
 .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border); transition: .3s; border-radius: 34px; }
@@ -91,7 +89,6 @@ button.secondary { background-color: var(--bg-base); color: var(--text-main); bo
 input:checked + .slider { background-color: var(--primary); }
 input:checked + .slider:before { transform: translateX(20px); }
 
-/* Chat Core */
 .chat-wrapper { position: relative; flex: 1; overflow: hidden; width: 100%; display: flex; flex-direction: column; background: var(--bg-base); }
 #media-container { width: 100%; max-height: 40%; background: #000; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: center; z-index: 10; flex-shrink: 0; }
 #media-container:not(.hidden) { display: flex; }
@@ -108,7 +105,6 @@ input:checked + .slider:before { transform: translateX(20px); }
 .draw-actions { display: flex; gap: 8px; }
 .draw-actions button { padding: 6px 12px; width: auto; margin:0; font-size: 0.85rem;}
 
-/* Chat Bubbles */
 .msg-wrap { display: flex; flex-direction: column; max-width: 85%; margin-bottom: 8px; z-index: 2;}
 .msg-wrap.self { align-self: flex-end; align-items: flex-end; }
 .msg-wrap.peer { align-self: flex-start; align-items: flex-start; }
@@ -119,21 +115,19 @@ input:checked + .slider:before { transform: translateX(20px); }
 .msg-ticks svg { width: 14px; height: 14px; stroke: var(--tick-deliv); }
 .msg-ticks.seen svg { stroke: var(--tick-seen); }
 
-/* File & Media Boxes */
 .file-bubble { width: 250px; display: flex; flex-direction: column; gap: 8px; }
 .media-preview { width: 100%; max-height: 200px; object-fit: cover; border-radius: 8px; background: #000; cursor: pointer; border: 1px solid rgba(0,0,0,0.1);}
 .file-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;}
 .file-progress-bg { height: 6px; background: rgba(0,0,0,0.1); border-radius: 3px; overflow: hidden; width: 100%;}
 .dark-mode .file-progress-bg { background: rgba(255,255,255,0.1); }
-.file-progress-fill { height: 100%; width: 0%; background: var(--msg-text-guest); transition: width 0.1s; }
-.btn-cancel { background: transparent; color: var(--msg-text-guest); opacity: 0.8; border: none; padding: 4px; cursor: pointer; display: flex; margin: 0; width: auto;}
+.file-progress-fill { height: 100%; width: 0%; background: var(--primary); transition: width 0.1s; }
+.btn-cancel { background: transparent; color: #ef4444; opacity: 0.8; border: none; padding: 4px; cursor: pointer; display: flex; margin: 0; width: auto;}
 
 .batch-folder { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-top: 5px;}
 .batch-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-weight: 600; font-size: 0.9rem;}
 .batch-list { display: none; margin-top: 10px; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
 .batch-list.open { display: flex; }
 
-/* Bottom Input Area */
 #chat-input-container { display: flex; align-items: flex-end; gap: 8px; padding: 10px 10px calc(10px + var(--safe-bottom)); background: var(--bg-base); z-index: 10; flex-shrink: 0; border-top: 1px solid var(--border);}
 
 #chat-input { 
@@ -149,7 +143,6 @@ input:checked + .slider:before { transform: translateX(20px); }
 .primary-icon:hover { background: var(--primary-hover); }
 .primary-icon:active { transform: scale(0.95); }
 
-/* Dice Dropup Menu */
 .dice-menu-container { position: relative; }
 .action-menu { position: absolute; bottom: calc(100% + 10px); left: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 8px; display: flex; flex-direction: column; gap: 4px; opacity: 0; pointer-events: none; transform: translateY(10px); transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-shadow: 0 5px 25px rgba(0,0,0,0.15); z-index: 20; min-width: 180px;}
 .action-menu.active { opacity: 1; pointer-events: all; transform: translateY(0); }
@@ -171,6 +164,5 @@ input:checked + .slider:before { transform: translateX(20px); }
 .beam { position: absolute; top: 0; left: -50px; width: 50px; height: 100%; background: var(--primary); box-shadow: 0 0 10px var(--primary); animation: shootBeam 1.5s infinite linear; }
 @keyframes pulseOrb { 0% { transform: scale(0.8); opacity: 0.6; } 100% { transform: scale(1.2); opacity: 1; } }
 @keyframes shootBeam { 0% { left: -50px; } 100% { left: 100px; } }
-
 .hidden { display: none !important; }
 .mt-10 { margin-top: 10px; }
