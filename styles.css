@@ -1,38 +1,38 @@
 :root {
-  /* Ultra-High Contrast Light Theme */
-  --bg-base: #ece5dd; 
+  /* Calm Blue Light Theme */
+  --bg-base: #f0f4f8; 
   --bg-card: #ffffff;
-  --text-main: #111b21; 
-  --text-sub: #667781;
-  --border: #d1d7db; 
-  --primary: #00a884; 
-  --primary-hover: #008f6f;
+  --text-main: #334155; 
+  --text-sub: #64748b;
+  --border: #e2e8f0; 
+  --primary: #3b82f6; 
+  --primary-hover: #2563eb;
   --msg-host: #ffffff;      
-  --msg-guest: #d9fdd3;     
-  --msg-text-guest: #111b21;
-  --ghost-bg: rgba(0, 168, 132, 0.1); 
-  --ghost-text: #667781;
-  --tick-seen: #53bdeb; 
-  --tick-deliv: #8696a0;
-  --radius: 12px;
+  --msg-guest: #3b82f6;     
+  --msg-text-guest: #ffffff;
+  --ghost-bg: rgba(59, 130, 246, 0.1); 
+  --ghost-text: #64748b;
+  --tick-seen: #10b981; 
+  --tick-deliv: #94a3b8;
+  --radius: 14px;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 body.dark-mode {
-  /* Ultra-High Contrast Dark Theme */
-  --bg-base: #0b141a; 
-  --bg-card: #111b21;
-  --text-main: #e9edef; 
-  --text-sub: #8696a0;
-  --border: #222e35; 
-  --primary: #00a884; 
-  --primary-hover: #008f6f;
-  --msg-host: #202c33; 
-  --msg-guest: #005c4b; 
-  --msg-text-guest: #e9edef;
-  --ghost-bg: rgba(0, 168, 132, 0.15);
+  /* Calm Blue Dark Theme */
+  --bg-base: #0f172a; 
+  --bg-card: #1e293b;
+  --text-main: #f8fafc; 
+  --text-sub: #94a3b8;
+  --border: #334155; 
+  --primary: #3b82f6; 
+  --primary-hover: #60a5fa;
+  --msg-host: #1e293b; 
+  --msg-guest: #2563eb; 
+  --msg-text-guest: #ffffff;
+  --ghost-bg: rgba(59, 130, 246, 0.15);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -40,13 +40,10 @@ body.dark-mode {
 /* Custom Clean Scrollbar */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(134, 150, 160, 0.5); border-radius: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(134, 150, 160, 0.3); border-radius: 10px; }
+.dark-mode ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); }
 
-/* 
-  THE DEEP LAYOUT FIX 
-  position: fixed completely locks the app to the visible screen limits.
-  It prevents the viewport from stretching, sinking, or showing black voids. 
-*/
+/* Bulletproof Layout Lock */
 body, html { 
   font-family: var(--font-sans); background-color: var(--bg-base); color: var(--text-main); 
   width: 100%; height: 100%; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -61,10 +58,6 @@ body, html {
 
 #app-container { flex: 1; width: 100%; max-width: 650px; margin: 0 auto; display: flex; flex-direction: column; position: relative; overflow: hidden; }
 
-/* 
-  OVERFLOW HIDDEN prevents the .view from scrolling.
-  This forces ONLY the chat-log to scroll, keeping the textbox locked in place. 
-*/
 .view { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; }
 .idle-view { padding: 20px; align-items: center; overflow-y: auto; }
 
@@ -119,9 +112,9 @@ input:checked + .slider:before { transform: translateX(20px); }
 .msg-wrap { display: flex; flex-direction: column; max-width: 85%; margin-bottom: 8px; z-index: 2;}
 .msg-wrap.self { align-self: flex-end; align-items: flex-end; }
 .msg-wrap.peer { align-self: flex-start; align-items: flex-start; }
-.msg-bubble { padding: 8px 12px; border-radius: 12px; font-size: 0.98rem; line-height: 1.4; word-wrap: break-word; white-space: pre-wrap; box-shadow: 0 1px 1px rgba(0,0,0,0.1); }
-.msg-wrap.self .msg-bubble { background: var(--msg-guest); color: var(--msg-text-guest); border-top-right-radius: 4px; }
-.msg-wrap.peer .msg-bubble { background: var(--msg-host); color: var(--text-main); border-top-left-radius: 4px; }
+.msg-bubble { padding: 10px 14px; border-radius: 14px; font-size: 0.98rem; line-height: 1.4; word-wrap: break-word; white-space: pre-wrap; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.msg-wrap.self .msg-bubble { background: var(--msg-guest); color: var(--msg-text-guest); border-bottom-right-radius: 4px; }
+.msg-wrap.peer .msg-bubble { background: var(--msg-host); color: var(--text-main); border-bottom-left-radius: 4px; border: 1px solid var(--border); }
 .msg-meta { display: flex; align-items: center; gap: 4px; margin-top: 2px; font-size: 0.7rem; color: var(--text-sub); font-weight: 500;}
 .msg-ticks svg { width: 14px; height: 14px; stroke: var(--tick-deliv); }
 .msg-ticks.seen svg { stroke: var(--tick-seen); }
@@ -132,8 +125,8 @@ input:checked + .slider:before { transform: translateX(20px); }
 .file-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem;}
 .file-progress-bg { height: 6px; background: rgba(0,0,0,0.1); border-radius: 3px; overflow: hidden; width: 100%;}
 .dark-mode .file-progress-bg { background: rgba(255,255,255,0.1); }
-.file-progress-fill { height: 100%; width: 0%; background: var(--primary); transition: width 0.1s; }
-.btn-cancel { background: transparent; color: #f15c6d; border: none; padding: 4px; cursor: pointer; display: flex; margin: 0; width: auto;}
+.file-progress-fill { height: 100%; width: 0%; background: var(--msg-text-guest); transition: width 0.1s; }
+.btn-cancel { background: transparent; color: var(--msg-text-guest); opacity: 0.8; border: none; padding: 4px; cursor: pointer; display: flex; margin: 0; width: auto;}
 
 .batch-folder { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin-top: 5px;}
 .batch-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-weight: 600; font-size: 0.9rem;}
@@ -146,9 +139,9 @@ input:checked + .slider:before { transform: translateX(20px); }
 #chat-input { 
   flex: 1; min-height: 44px; max-height: 100px; padding: 12px 16px; margin: 0; 
   border: none; border-radius: 22px; background: var(--bg-card); 
-  color: var(--text-main); font-size: 16px; /* 16px strictly stops iOS auto-zoom */
+  color: var(--text-main); font-size: 16px; 
   resize: none; outline: none; line-height: 1.4;
-  overflow-y: auto; font-family: inherit; box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+  overflow-y: auto; font-family: inherit; box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 
 .icon-btn { background: transparent; border: none; padding: 10px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-sub); width: auto; margin:0;}
