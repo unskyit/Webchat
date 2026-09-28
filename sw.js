@@ -1,4 +1,5 @@
-const CACHE_NAME = 'webchat-v3';
+// sw.js
+const CACHE_NAME = 'webchat-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -7,6 +8,8 @@ const ASSETS = [
   './utils.js',
   './protocol.js',
   './webrtc.js',
+  './draw.js',
+  './filesystem.js',
   './qrcode.min.js',
   './html5-qrcode.min.js',
   './manifest.json',
@@ -14,9 +17,26 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
+  self.skipWaiting(); // Forces the waiting service worker to become the active service worker
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
+});
+
+// Added activate event to wipe out old cache versions (like v3) automatically
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cache) => {
+          if (cache !== CACHE_NAME) {
+            return caches.delete(cache);
+          }
+        })
+      );
+    })
+  );
+  self.clients.claim(); // Take control of all clients immediately
 });
 
 self.addEventListener('fetch', (e) => {
