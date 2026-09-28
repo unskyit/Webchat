@@ -42,6 +42,16 @@ const App = {
   activeIncomingFile: null, activeBatches: {},
 
   init() {
+    // Physical fix for safe mobile scaling when keyboard opens
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', () => {
+        document.body.style.height = window.visualViewport.height + 'px';
+        window.scrollTo(0,0);
+        const log = document.getElementById('chat-log');
+        if(log) log.scrollTop = log.scrollHeight;
+      });
+    }
+
     window.addEventListener('popstate', (e) => {
       if (e.state && e.state.view) App.renderState(e.state.view, false);
       else App.renderState('IDLE', false);
@@ -82,9 +92,9 @@ const App = {
   },
 
   buildIdleView() {
-    const view = Utils.createElement('div', '', 'view');
+    const view = Utils.createElement('div', '', 'view idle-view');
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = `<h1 class="brand">New Session</h1><p>${App.settings.useCloud ? 'Enter a PIN to connect.' : 'Create an offline room.'}</p>`;
+    card.innerHTML = `<h1>New Session</h1><p>${App.settings.useCloud ? 'Enter a PIN to connect.' : 'Create an offline room.'}</p>`;
 
     if (App.settings.useCloud) {
       const inputOTP = Utils.createElement('input', '', 'otp-input'); inputOTP.placeholder = "e.g. secret45";
@@ -97,8 +107,8 @@ const App = {
 
   async hostCloudRoom(pin) {
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = `<h1 class="brand">Room Created</h1><h2 class="otp-input">${pin}</h2>${animHTML}<p>Waiting for friend...</p>`;
-    App.container.innerHTML = '<div class="view"></div>'; App.container.firstChild.appendChild(card);
+    card.innerHTML = `<h1>Room Created</h1><h2 class="otp-input">${pin}</h2>${animHTML}<p>Waiting for friend...</p>`;
+    App.container.innerHTML = '<div class="view idle-view"></div>'; App.container.firstChild.appendChild(card);
     
     connection = new P2PConnection(App);
     try {
@@ -115,7 +125,7 @@ const App = {
   async joinCloudRoom(pin) {
     const card = Utils.createElement('div', '', 'card');
     card.innerHTML = `<h1>Connecting...</h1><p>PIN: ${pin}</p>${animHTML}`;
-    App.container.innerHTML = '<div class="view"></div>'; App.container.firstChild.appendChild(card);
+    App.container.innerHTML = '<div class="view idle-view"></div>'; App.container.firstChild.appendChild(card);
     
     connection = new P2PConnection(App);
     try {
@@ -169,11 +179,11 @@ const App = {
     document.getElementById('btn-draw-clear').onclick = () => DrawController.clear(true);
     document.getElementById('btn-draw-close').onclick = () => { DrawController.toggle(false); drawToolbar.classList.add('hidden'); };
 
-    // 4-Line Smart Auto-Resize Textarea
+    // Smart Text Input Auto-Resize
     const input = document.getElementById('chat-input'); let ghostTimeout;
     input.addEventListener('input', function() {
       this.style.height = '44px';
-      this.style.height = Math.min(this.scrollHeight, 100) + 'px'; // Max 4 lines (100px)
+      this.style.height = Math.min(this.scrollHeight, 100) + 'px'; // Max 4 lines
       if (App.settings.ghostTyping && connection) {
         connection.sendPayload(Protocol.createGhostTyping(this.value, true));
         clearTimeout(ghostTimeout); ghostTimeout = setTimeout(() => connection.sendPayload(Protocol.createGhostTyping('', false)), 2000);
@@ -186,14 +196,12 @@ const App = {
       const msg = Protocol.createChatMessage(txt); connection.sendPayload(msg);
       if(App.settings.ghostTyping) connection.sendPayload(Protocol.createGhostTyping('', false));
       App.renderMessage(JSON.parse(msg), true); Synthesizer.playPop(); 
-      input.value = ''; input.style.height = '44px'; // Reset height
+      input.value = ''; input.style.height = '44px';
     };
 
-    // Prevent default touch/click from closing the mobile keyboard
-    sendBtn.addEventListener('mousedown', (e) => e.preventDefault());
-    sendBtn.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
-    sendBtn.onclick = () => { sendMsg(); input.focus(); };
-    
+    // THE SILVER BULLET for Keyboard staying open
+    sendBtn.addEventListener('pointerdown', (e) => e.preventDefault()); 
+    sendBtn.onclick = (e) => { e.preventDefault(); sendMsg(); };
     input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } };
     
     // Receipt Observer
@@ -303,7 +311,7 @@ const App = {
     
     const target = (batchId && App.activeBatches[batchId]?.ui) ? App.activeBatches[batchId].ui : log;
     if (target === log) { const wrap = Utils.createElement('div', '', `msg-wrap ${isUpload ? 'self' : 'peer'}`); wrap.appendChild(el); target.appendChild(wrap); } 
-    else { el.style.width = '100%'; el.style.border = '1px solid var(--border)'; target.appendChild(el); target.classList.add('open'); }
+    else { el.style.width = '100%'; el.style.border = 'none'; target.appendChild(el); target.classList.add('open'); }
     log.scrollTop = log.scrollHeight;
   },
 
@@ -330,7 +338,6 @@ const App = {
     let cont = document.getElementById('media-container');
     cont.classList.remove('hidden');
     let video = document.getElementById('remote-screen');
-    // Ensure playsInline is properly attached for mobile iOS rendering
     if (!video) {
       video = document.createElement('video'); video.id = 'remote-screen';
       video.autoplay = true; video.playsInline = true; video.muted = true;
