@@ -119,7 +119,15 @@ input:checked + .slider:before { transform: translateX(20px); }
 .draw-actions { display: flex; gap: 8px; }
 .draw-actions button { padding: 8px 12px; margin: 0; font-size: 0.9rem; }
 
-.msg-wrap { display: flex; flex-direction: column; max-width: 85%; margin-bottom: 8px; z-index: 2; overflow: hidden; }
+.msg-wrap { 
+  display: flex; 
+  flex-direction: column; 
+  max-width: 85%; 
+  margin-bottom: 8px; 
+  z-index: 2; 
+  overflow: hidden; 
+  flex-shrink: 0; /* Add this to prevent squishing and enable scrolling */
+}
 .msg-wrap.self { align-self: flex-end; align-items: flex-end; }
 .msg-wrap.peer { align-self: flex-start; align-items: flex-start; }
 
