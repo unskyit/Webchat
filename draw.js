@@ -9,7 +9,8 @@ const DrawController = {
 
   init(canvasId, onSendCommand) {
     this.canvas = document.getElementById(canvasId);
-    this.ctx = this.canvas.getContext('2d', { desynchronized: true });
+    // FIX: Removed { desynchronized: true } to prevent mobile GPU black-screen rendering bugs
+    this.ctx = this.canvas.getContext('2d');
     this.onSendCommand = onSendCommand;
     
     this.resize();
