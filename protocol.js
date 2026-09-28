@@ -1,58 +1,76 @@
-// protocol.js - Data structuring, validation, and constants
+// protocol.js - Advanced Data Validation, Structure & Hardware Handlers
 
 const Protocol = {
-  VERSION: 1,
-  MAX_MESSAGE_LENGTH: 4096,
-  SIGNAL_EXPIRATION_MS: 5 * 60 * 1000, // 5 minutes
-  IDLE_TIMEOUT_MS: 5 * 60 * 1000,      // 5 minutes
+  VERSION: 2,
+  MAX_MESSAGE_LENGTH: 8192,
+  SIGNAL_EXPIRATION_MS: 5 * 60 * 1000, 
+  IDLE_TIMEOUT_MS: 60 * 60 * 1000, // Extended to 1 hour for large files
 
-  // Creates a strictly formatted signaling payload
-  createSignal: (type, sessionId, sdp) => {
-    return JSON.stringify({
-      v: Protocol.VERSION,
-      t: type,            // 'offer' or 'answer'
-      i: sessionId,
-      ts: Date.now(),
-      s: sdp
-    });
+  // Message Type Enumeration for strict routing
+  TYPES: {
+    CHAT: 'chat',
+    GHOST: 'ghost',
+    RECEIPT: 'receipt', // sent, delivered, seen
+    DRAW: 'draw_stroke',
+    DRAW_UNDO: 'draw_undo',
+    DRAW_CLEAR: 'draw_clear',
+    FILE_START: 'file_start',
+    FILE_CHUNK: 'file_chunk',
+    FILE_END: 'file_end',
+    FILE_CANCEL: 'file_cancel',
+    SCREEN_OFFER: 'screen_offer',
+    SCREEN_ANSWER: 'screen_answer'
   },
 
-  // Validates incoming signaling payloads
+  createSignal: (type, sessionId, sdp) => {
+    return JSON.stringify({ v: Protocol.VERSION, t: type, i: sessionId, ts: Date.now(), s: sdp });
+  },
+
   validateSignal: (jsonStr, expectedType) => {
     try {
       const data = JSON.parse(jsonStr);
-      if (data.v !== Protocol.VERSION) throw new Error("ERR_PROTOCOL_MISMATCH");
-      if (data.t !== expectedType) throw new Error("ERR_INVALID_SIGNAL_TYPE");
-      if (typeof data.i !== 'string' || typeof data.s !== 'object') throw new Error("ERR_MALFORMED_SIGNAL");
-      
-      const age = Date.now() - data.ts;
-      if (age > Protocol.SIGNAL_EXPIRATION_MS || age < -10000) {
-        throw new Error("ERR_EXPIRED_LINK");
-      }
+      if (data.v !== Protocol.VERSION || data.t !== expectedType) return null;
+      if (typeof data.i !== 'string' || typeof data.s !== 'object') return null;
+      if (Date.now() - data.ts > Protocol.SIGNAL_EXPIRATION_MS) throw new Error("ERR_EXPIRED_LINK");
       return data;
-    } catch (e) {
-      console.error("Signal validation failed:", e.message);
-      return null;
-    }
+    } catch (e) { return null; }
   },
 
-  // Creates a chat message payload
+  // 1. Text & Receipts
   createChatMessage: (text) => {
-    return JSON.stringify({
-      v: Protocol.VERSION,
-      type: 'chat',
-      id: Utils.generateId(),
-      text: text.slice(0, Protocol.MAX_MESSAGE_LENGTH)
-    });
+    return JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.CHAT, id: Utils.generateId(), text: text.slice(0, Protocol.MAX_MESSAGE_LENGTH), ts: Date.now() });
+  },
+  
+  createGhostTyping: (text, isTyping) => {
+    return JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.GHOST, text: text.slice(0, 500), active: isTyping });
   },
 
-  // Validates incoming chat messages
-  validateChatMessage: (jsonStr) => {
+  createReceipt: (msgId, status) => {
+    // status: 1 = delivered, 2 = seen
+    return JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.RECEIPT, id: msgId, status: status });
+  },
+
+  // 2. Vector Drawing
+  createDrawStroke: (strokeObj) => {
+    // strokeObj: { id: string, color: string, w: number, points: [[x,y], [x,y]] }
+    return JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.DRAW, stroke: strokeObj });
+  },
+
+  createDrawCommand: (type) => {
+    // type: DRAW_UNDO or DRAW_CLEAR
+    return JSON.stringify({ v: Protocol.VERSION, type: type });
+  },
+
+  // 3. File streaming
+  createFileHeader: (file, id) => {
+    return JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.FILE_START, id: id, name: file.name, size: file.size, mime: file.type || 'application/octet-stream' });
+  },
+
+  // Parses incoming text messages securely
+  parsePayload: (jsonStr) => {
     try {
-      if (jsonStr.length > Protocol.MAX_MESSAGE_LENGTH + 500) throw new Error("ERR_MESSAGE_TOO_LARGE");
       const data = JSON.parse(jsonStr);
-      if (data.v !== Protocol.VERSION || data.type !== 'chat') return null;
-      if (typeof data.text !== 'string') return null;
+      if (data.v !== Protocol.VERSION) return null;
       return data;
     } catch (e) {
       return null;
