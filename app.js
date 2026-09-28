@@ -120,6 +120,20 @@ const App = {
     App.renderState('IDLE', true);
   },
 
+  showAlert(text, title = "Notice") {
+    const titleEl = document.getElementById('custom-alert-title');
+    const textEl = document.getElementById('custom-alert-text');
+    const overlay = document.getElementById('custom-alert-overlay');
+    if (overlay && titleEl && textEl) {
+        titleEl.textContent = title;
+        textEl.textContent = text;
+        overlay.classList.remove('hidden');
+        document.getElementById('custom-alert-btn').onclick = () => overlay.classList.add('hidden');
+    } else {
+        alert(`${title}: ${text}`);
+    }
+  },
+
   async stopScannerSafely() {
     if (html5QrCode) {
       try { await html5QrCode.stop(); } catch(e) {}
@@ -135,6 +149,9 @@ const App = {
     App.container.innerHTML = ''; 
     App.stopScannerSafely();
     
+    const modeSetting = document.getElementById('setting-row-mode');
+    if (modeSetting) modeSetting.style.display = (state === 'CONNECTED') ? 'none' : 'flex';
+
     const headerActions = document.getElementById('header-actions');
     if (state === 'IDLE') {
       if(window.DrawController) DrawController.clear(false); 
@@ -164,7 +181,7 @@ const App = {
       const btnJoin = Utils.createElement('button', 'Join Offline Room', 'secondary');
       btnJoin.onclick = () => App.renderScannerUI('offer', (decoded) => {
         const sig = Protocol.validateSignal(Utils.decodeBase64Url(decoded), 'offer');
-        if (sig) App.handleManualJoin(sig); else { alert("Invalid Offer Code."); App.renderState('IDLE'); }
+        if (sig) App.handleManualJoin(sig); else { App.showAlert("Invalid Offer Code.", "Scan Failed"); App.renderState('IDLE'); }
       });
       card.appendChild(btnHost); card.appendChild(btnJoin);
     }
@@ -199,7 +216,7 @@ const App = {
        await App.stopScannerSafely(); readerWrapper.style.display = 'block';
        html5QrCode = new Html5Qrcode("reader-container");
        try { await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: (vw, vh) => ({ width: Math.min(vw, vh) * 0.8, height: Math.min(vw, vh) * 0.8 }) }, handleScan); } 
-       catch(e) { alert("Camera failed."); }
+       catch(e) { App.showAlert("Camera failed to load or permission was denied.", "Error"); }
     };
 
     const btnCam = Utils.createElement('button', '📸 Open Camera', 'secondary'); btnCam.onclick = () => startCam();
@@ -246,7 +263,7 @@ const App = {
         const data = await res.json();
         if (data.payload) { clearInterval(poll); const answerSignal = Protocol.validateSignal(data.payload, 'answer'); if (answerSignal) connection.acceptAnswer(answerSignal); }
       }, 3000);
-    } catch(e) { alert("Network failed."); App.renderState('IDLE'); }
+    } catch(e) { App.showAlert("Network failed. Ensure you are connected to the internet.", "Network Error"); App.renderState('IDLE'); }
   },
 
   async joinCloudRoom(pin) {
@@ -261,7 +278,7 @@ const App = {
       if (!data.payload) throw new Error("Room not found.");
       const answerStr = await connection.acceptOfferAndGenerateAnswer(Protocol.validateSignal(data.payload, 'offer'));
       await fetch(APP_SCRIPT_URL, { method: 'POST', body: JSON.stringify({ room: pin, type: 'answer', payload: answerStr }) });
-    } catch(e) { alert(e.message); App.renderState('IDLE'); }
+    } catch(e) { App.showAlert(e.message, "Join Failed"); App.renderState('IDLE'); }
   },
 
   async hostManualRoom() {
@@ -279,7 +296,7 @@ const App = {
         const btnScan = Utils.createElement('button', 'Provide Answer Code');
         btnScan.onclick = () => App.renderScannerUI('answer', (decoded) => {
            const ans = Protocol.validateSignal(Utils.decodeBase64Url(decoded), 'answer');
-           if(ans) connection.acceptAnswer(ans); else { alert("Invalid."); App.renderState('IDLE'); } 
+           if(ans) connection.acceptAnswer(ans); else { App.showAlert("Invalid code scanned."); App.renderState('IDLE'); } 
         });
         card.appendChild(btnScan);
       }, 200);
@@ -312,6 +329,20 @@ const App = {
     document.getElementById('btn-screen-cast').onclick = () => { diceMenu.classList.remove('active'); connection.toggleScreenCasting(); };
     document.getElementById('btn-chat-settings').onclick = () => { diceMenu.classList.remove('active'); document.getElementById('settings-overlay').classList.remove('hidden'); };
 
+    const btnFullscreen = document.getElementById('btn-fullscreen-cast');
+    if (btnFullscreen) {
+       btnFullscreen.onclick = () => {
+         const cont = document.getElementById('media-container');
+         if (!document.fullscreenElement) {
+            if(cont.requestFullscreen) cont.requestFullscreen();
+            else if(cont.webkitRequestFullscreen) cont.webkitRequestFullscreen();
+         } else {
+            if(document.exitFullscreen) document.exitFullscreen();
+            else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+         }
+       };
+    }
+
     const fileInput = document.getElementById('file-input');
     document.getElementById('btn-file').onclick = () => { diceMenu.classList.remove('active'); fileInput.click(); };
     fileInput.onchange = (e) => {
@@ -333,10 +364,18 @@ const App = {
 
     DrawController.init('chat-canvas', (cmdStr) => connection.sendPayload(cmdStr));
     const drawToolbar = document.getElementById('draw-toolbar');
+    
     document.getElementById('btn-draw-toggle').onclick = () => { diceMenu.classList.remove('active'); DrawController.toggle(!DrawController.isActive); drawToolbar.classList.toggle('hidden', !DrawController.isActive); };
     document.querySelectorAll('.color-swatch').forEach(el => { el.onclick = () => { document.querySelector('.color-swatch.active').classList.remove('active'); el.classList.add('active'); DrawController.setColor(el.dataset.color); }; });
+    
     document.getElementById('btn-draw-undo').onclick = () => DrawController.undo(true);
-    document.getElementById('btn-draw-clear').onclick = () => DrawController.clear(true);
+    
+    const btnDrawClear = document.getElementById('btn-draw-clear');
+    if (btnDrawClear) btnDrawClear.onclick = () => DrawController.clear(true);
+    
+    const btnDrawSend = document.getElementById('btn-draw-send');
+    if (btnDrawSend) btnDrawSend.onclick = () => DrawController.sendAsMessage(false);
+    
     document.getElementById('btn-draw-close').onclick = () => { DrawController.toggle(false); drawToolbar.classList.add('hidden'); };
 
     const input = document.getElementById('chat-input'); let ghostTimeout;
@@ -358,7 +397,6 @@ const App = {
       input.value = ''; input.style.height = '44px';
     };
 
-    // Keep mobile keyboard open when sending
     sendBtn.addEventListener('pointerdown', (e) => e.preventDefault()); 
     sendBtn.onclick = (e) => { e.preventDefault(); sendMsg(); };
     input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } };
@@ -379,7 +417,7 @@ const App = {
     } else if (status === 'ERR_PEER_DISCONNECTED' || status === 'CLOSED') {
       clearInterval(App.sessionTimer); clearInterval(App.metricsInterval);
       document.getElementById('metrics-hud').style.display = 'none';
-      alert(msg); App.renderState('IDLE', true);
+      App.showAlert(msg, "Disconnected"); App.renderState('IDLE', true);
     }
   },
 
@@ -409,7 +447,9 @@ const App = {
       if (msg.active && msg.text) { cont.classList.remove('hidden'); txt.textContent = msg.text; document.getElementById('chat-log').scrollTop = document.getElementById('chat-log').scrollHeight; } 
       else { cont.classList.add('hidden'); txt.textContent = ''; }
     }
-    else if ([Protocol.TYPES.DRAW, Protocol.TYPES.DRAW_UNDO, Protocol.TYPES.DRAW_CLEAR].includes(msg.type)) DrawController.handleNetworkCommand(msg);
+    // Fixed matching types for drawing based on original standard
+    else if ([Protocol.TYPES.DRAW_START, Protocol.TYPES.DRAW_PT, Protocol.TYPES.DRAW_UNDO].includes(msg.type)) DrawController.handleNetworkCommand(msg);
+    else if (msg.type === Protocol.TYPES.DRAW_FINISH) DrawController.sendAsMessage(true);
     else if (msg.type === Protocol.TYPES.FILE_START) App.onIncomingFileStart(msg);
     else if (msg.type === Protocol.TYPES.FILE_END) App.onIncomingFileEnd(msg.id);
     else if (msg.type === Protocol.TYPES.FILE_CANCEL) App.onIncomingFileEnd(msg.id, true);
@@ -426,6 +466,16 @@ const App = {
     if (!isSelf) { wrap.dataset.status = 'deliv'; App.receiptObserver.observe(wrap); }
   },
 
+  // Restored method needed to render finished canvases inside the chat
+  renderDrawingMessage(dataUrl, isSelf) {
+    const log = document.getElementById('chat-log');
+    const wrap = Utils.createElement('div', '', `msg-wrap ${isSelf ? 'self' : 'peer'}`);
+    wrap.innerHTML = `<div class="msg-bubble" style="padding: 4px; overflow: hidden; background: transparent; border: none; box-shadow: none;">
+                        <img src="${dataUrl}" class="media-preview canvas-snapshot">
+                      </div><div class="msg-meta" style="justify-content:${isSelf ? 'flex-end' : 'flex-start'};">Drawing</div>`;
+    log.appendChild(wrap); log.scrollTop = log.scrollHeight;
+  },
+
   updateReceipt(id, status) {
     const tick = document.getElementById(`tick-${id}`); if(!tick) return;
     if(status === 1) tick.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M18 6l-9 11-4-5"/><path d="M22 6l-9 11"/></svg>';
@@ -436,7 +486,11 @@ const App = {
     let stream = null; let fileHandle = null;
     if (FileSystem.sessionFolder) {
       const res = await FileSystem.createWritable(msg.name);
-      if (res) { stream = res.stream; fileHandle = res.fileHandle; }
+      if (res) { 
+        // Robust assignment preventing crash if `createWritable` only returns the stream
+        stream = res.stream || res; 
+        fileHandle = res.fileHandle || null; 
+      }
     }
     
     if(msg.bId && msg.bTot > 1 && !App.activeBatches[msg.bId]) {
@@ -449,7 +503,6 @@ const App = {
       App.activeBatches[msg.bId].ui = document.getElementById(`blist-${msg.bId}`);
     }
 
-    // FIX: Added 'writeQueue' to prevent disk-write race conditions causing the 0% bug
     App.activeIncomingFile = { id: msg.id, name: msg.name, size: msg.size, mime: msg.mime, chunks: [], stream: stream, fileHandle: fileHandle, received: 0, bId: msg.bId, writeQueue: Promise.resolve() };
     App.onFileTransferStart(msg.id, msg.name, msg.size, false, msg.bId);
   },
@@ -458,7 +511,6 @@ const App = {
     const f = App.activeIncomingFile; if(!f) return;
     f.received += buffer.byteLength;
     if (f.stream) {
-       // FIX: Queue stream writes sequentially to prevent concurrent write crashes
        f.writeQueue = f.writeQueue.then(() => f.stream.write(buffer));
     } else { 
        f.chunks.push(buffer); 
@@ -471,10 +523,8 @@ const App = {
     let url = null;
     
     if (f.stream) {
-      await f.writeQueue; // Wait for all queued disk writes to finish
+      await f.writeQueue;
       await f.stream.close();
-      
-      // Generate preview for media even if it was saved directly to disk
       if (f.fileHandle && (f.mime.startsWith('image/') || f.mime.startsWith('video/') || f.mime.startsWith('audio/'))) {
          const file = await f.fileHandle.getFile();
          url = URL.createObjectURL(file);
@@ -491,7 +541,6 @@ const App = {
     App.activeIncomingFile = null;
   },
 
-  // Helper method to insert media previews safely
   _insertMediaPreview(box, url, mimeType) {
     if (mimeType.startsWith('image/')) { 
       const img = document.createElement('img'); img.src = url; img.className = 'media-preview'; img.onclick = () => window.open(url); box.insertBefore(img, box.firstChild); 
@@ -506,12 +555,9 @@ const App = {
 
   onFileTransferStart(id, name, size, isUpload, batchId = null, fileObj = null) {
     const log = document.getElementById('chat-log');
-    
-    // FIX: Using class "file-name" to enforce ellipsis truncation
     const boxHTML = `<div class="file-row"><strong class="file-name" title="${name}">${name}</strong>${isUpload ? `<button class="btn-cancel" onclick="connection.cancelActiveTransfer()" title="Cancel">✕</button>` : ''}</div><div class="file-row" style="color:var(--text-sub);"><small>${(size/(1024*1024)).toFixed(2)} MB</small><small id="text-${id}">${isUpload ? 'Sending' : 'Receiving'}...</small></div><div class="file-progress-bg"><div id="prog-${id}" class="file-progress-fill"></div></div>`;
     const el = Utils.createElement('div', '', 'msg-bubble file-bubble'); el.id = 'ui-f-' + id; el.innerHTML = boxHTML;
     
-    // Generate immediate media preview for the sender
     if (isUpload && fileObj) {
       const url = URL.createObjectURL(fileObj);
       App._insertMediaPreview(el, url, fileObj.type);
@@ -523,7 +569,6 @@ const App = {
     } 
     else { 
        el.style.width = '100%'; el.style.border = '1px solid var(--border)'; target.appendChild(el); 
-       // FIX: Removed target.classList.add('open') so batch lists stay collapsed by default
     }
     log.scrollTop = log.scrollHeight;
   },
@@ -540,12 +585,10 @@ const App = {
     if(success && bar) bar.style.width = '100%';
     if(!success) { if(txt) txt.textContent = '❌ Cancelled'; return; }
     
-    // FIX: Replaced emoji with a styled green tickmark
     if(txt) txt.innerHTML = (FileSystem.sessionFolder ? 'Saved' : 'Complete') + ' <span style="color:#10b981;">✔</span>';
 
     const cancelBtn = box.querySelector('.btn-cancel'); if(cancelBtn) cancelBtn.remove();
     
-    // Generate preview for receiver if it wasn't already generated on the sender side
     if (url && !box.querySelector('.media-preview') && !box.querySelector('.media-preview-audio')) {
        App._insertMediaPreview(box, url, mimeType);
     }
