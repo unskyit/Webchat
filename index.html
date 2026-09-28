@@ -7,22 +7,26 @@
   
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔒</text></svg>">
   <link rel="stylesheet" href="styles.css">
-  
-  <!-- NEW PWA TAGS -->
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#2563eb">
   <link rel="apple-touch-icon" href="icon.svg">
-  
 </head>
-<!-- ... (rest of your body stays exactly the same) ... -->
 <body class="light-mode">
   
   <header class="app-header">
     <div class="header-content">
-      <div style="display: flex; flex-direction: column;">
+      <div class="brand-group">
         <h2 class="brand">Webchat</h2>
         <small class="brand-sub">by unskyit.com</small>
       </div>
+      
+      <!-- Metrics & Connection Status HUD -->
+      <div id="metrics-hud" class="hidden">
+        <span id="session-timer">00:00</span>
+        <span class="hud-divider">|</span>
+        <span id="transfer-speed">0 MB/s</span>
+      </div>
+
       <button id="btn-settings" class="icon-btn">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       </button>
@@ -32,46 +36,102 @@
   <!-- Settings Overlay -->
   <div id="settings-overlay" class="hidden">
     <div class="settings-card">
-      <h3 style="margin-bottom: 20px;">Settings</h3>
+      <h3>Settings</h3>
+      <button id="btn-install-pwa" class="btn-success hidden">📲 Install App</button>
       
-      <!-- NEW: Install PWA Button (Hidden by default) -->
-      <button id="btn-install-pwa" style="display: none; background-color: #10b981; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);">
-        📲 Install App to Home Screen
-      </button>
-
       <div class="setting-row">
         <span>Dark Mode</span>
         <label class="switch"><input type="checkbox" id="toggle-theme"><span class="slider"></span></label>
       </div>
-      
       <div class="setting-row">
-        <div class="setting-text">
-          <span>Connection Mode</span>
-          <small id="mode-desc">Cloud OTP (Requires Internet)</small>
-        </div>
+        <div class="setting-text"><span>Connection Mode</span><small id="mode-desc">Cloud OTP</small></div>
         <label class="switch"><input type="checkbox" id="toggle-mode" checked><span class="slider"></span></label>
       </div>
-
       <div class="setting-row">
-        <div class="setting-text">
-          <span>QR Code Splitter</span>
-          <small>Fewer = Faster. More = Easier to scan.</small>
+        <div class="setting-text"><span>Ghost Typing</span><small>Live text preview</small></div>
+        <label class="switch"><input type="checkbox" id="toggle-ghost"><span class="slider"></span></label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-text"><span>QR Code Splitter</span></div>
+        <div class="slider-group">
+          <input type="range" id="qr-slider" min="1" max="10" value="3">
+          <span id="qr-slider-val">3</span>
         </div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <input type="range" id="qr-slider" min="1" max="10" value="3" style="width: 80px; padding: 0; margin: 0; border: none; background: transparent;">
-          <span id="qr-slider-val" style="font-weight: bold; width: 24px; text-align: right;">3</span>
+      </div>
+      <div class="setting-data-usage">
+        <small>Total Session Data:</small>
+        <div id="data-counter">0 MB ⬆ | 0 MB ⬇</div>
+      </div>
+      <button id="btn-close-settings" class="secondary mt-10">Close</button>
+    </div>
+  </div>
+
+  <main id="app-container"></main>
+
+  <!-- HTML Templates injected dynamically by App.js -->
+  <template id="tpl-chat">
+    <div class="view chat-view">
+      <!-- Media/Tools Bar -->
+      <div id="chat-tools-bar">
+        <button id="btn-draw-toggle" class="tool-btn" title="Draw on Chat">✏️</button>
+        <button id="btn-screen-cast" class="tool-btn" title="Share Screen">🖥️</button>
+        <button id="btn-set-dir" class="tool-btn" title="Set Save Directory">📁</button>
+        <div class="spacer"></div>
+        <button id="btn-end" class="btn-danger">End</button>
+      </div>
+
+      <!-- Drawing Toolbar (Hidden by default) -->
+      <div id="draw-toolbar" class="hidden">
+        <div class="color-picker">
+          <div class="color-swatch active" data-color="#ff0000" style="background:#ff0000;"></div>
+          <div class="color-swatch" data-color="#00ff00" style="background:#00ff00;"></div>
+          <div class="color-swatch" data-color="#0000ff" style="background:#0000ff;"></div>
+          <div class="color-swatch" data-color="#ffffff" style="background:#ffffff;"></div>
+          <div class="color-swatch" data-color="#ff9900" style="background:#ff9900;"></div>
+        </div>
+        <div class="draw-actions">
+          <button id="btn-draw-undo">Undo</button>
+          <button id="btn-draw-redo">Redo</button>
+          <button id="btn-draw-clear">Clear My Ink</button>
+          <button id="btn-draw-close">Close</button>
         </div>
       </div>
 
-      <button id="btn-close-settings" class="secondary" style="margin-top: 10px;">Close</button>
-    </div>
-  </div>
-  <main id="app-container"></main>
+      <!-- Chat Area -->
+      <div class="chat-wrapper">
+        <!-- Interactive Canvas Overlay -->
+        <canvas id="chat-canvas"></canvas>
+        <div id="chat-log"></div>
+      </div>
+      
+      <!-- Ghost Typing Indicator -->
+      <div id="ghost-typing-container" class="hidden">
+        <div class="typing-indicator"><span></span><span></span><span></span></div>
+        <div id="ghost-text-preview"></div>
+      </div>
 
+      <!-- Input Area -->
+      <div id="chat-input-container">
+        <input type="file" id="file-input" multiple style="display: none;">
+        <button id="btn-file" class="icon-btn">
+          <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
+        </button>
+        <!-- Textarea prevents passkey/wallet popups and allows Shift+Enter formatting -->
+        <textarea id="chat-input" rows="1" placeholder="Type message..." autocomplete="off" spellcheck="false" inputmode="text"></textarea>
+        <button id="btn-send" class="icon-btn primary-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+        </button>
+      </div>
+    </div>
+  </template>
+
+  <!-- External Scripts -->
   <script src="qrcode.min.js"></script>
   <script src="html5-qrcode.min.js"></script>
   <script src="utils.js"></script>
   <script src="protocol.js"></script>
+  <script src="draw.js"></script>
+  <script src="filesystem.js"></script>
   <script src="webrtc.js"></script>
   <script src="app.js"></script>
 </body>
