@@ -22,6 +22,15 @@
     </div>
   </header>
 
+  <!-- Custom Alert Box -->
+  <div id="custom-alert-overlay" class="hidden">
+    <div class="custom-alert-box">
+      <h3 id="custom-alert-title">Notice</h3>
+      <p id="custom-alert-text"></p>
+      <button id="custom-alert-btn" class="btn-success">OK</button>
+    </div>
+  </div>
+
   <!-- Settings Overlay -->
   <div id="settings-overlay" class="hidden">
     <div class="settings-card">
@@ -45,7 +54,8 @@
         <div class="setting-text"><span>Sound Effects</span></div>
         <label class="switch"><input type="checkbox" id="toggle-sound" checked><span class="slider"></span></label>
       </div>
-      <div class="setting-row">
+      <!-- Mode setting gets dynamically hidden during active chat -->
+      <div class="setting-row" id="setting-row-mode">
         <div class="setting-text"><span>Connection Mode</span><small id="mode-desc">Cloud OTP</small></div>
         <label class="switch"><input type="checkbox" id="toggle-mode" checked><span class="slider"></span></label>
       </div>
@@ -77,15 +87,16 @@
           <div class="color-swatch" data-color="#f59e0b" style="background:#f59e0b;"></div>
         </div>
         <div class="draw-actions">
-          <button id="btn-draw-undo">Undo</button>
-          <button id="btn-draw-clear">Clear</button>
-          <button id="btn-draw-close" class="secondary">Close</button>
+          <button id="btn-draw-undo" class="secondary">Undo</button>
+          <button id="btn-draw-send">Done & Send</button>
+          <button id="btn-draw-close" class="btn-danger">Cancel</button>
         </div>
       </div>
 
       <div class="chat-wrapper">
         <!-- Dedicated Media Container for Screencast -->
         <div id="media-container" class="hidden">
+          <button id="btn-fullscreen-cast" class="overlay-btn" title="Fullscreen / Zoom">⛶</button>
           <video id="remote-screen" autoplay playsinline muted></video>
         </div>
         <canvas id="chat-canvas"></canvas>
@@ -111,12 +122,12 @@
             <div class="menu-divider"></div>
             <button class="action-btn" id="btn-file"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg> Send Files</button>
             <div class="menu-divider"></div>
-            <!-- THE MISSING BUTTON RESTORED -->
             <button class="action-btn" id="btn-chat-settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg> Settings & Info</button>
           </div>
         </div>
 
         <input type="file" id="file-input" multiple style="display: none;">
+        <!-- Enter key fixed: solely relied on physical UI button for send -->
         <textarea id="chat-input" placeholder="Type a message..." autocomplete="off" spellcheck="false"></textarea>
         <button id="btn-send" class="icon-btn primary-icon">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
