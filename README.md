@@ -65,27 +65,30 @@ Webchat is not just a messaging app; it is a demonstration of extreme client-sid
 
 ---
 
-## 📐 Architecture & Drawings
+## 📐 Architecture & Flowcharts
 
-How exactly does a serverless app connect? Webchat utilizes two distinct architectural bridges. 
+How exactly does a serverless app connect? Webchat utilizes two distinct architectural bridges, mapped out below in zero-dependency ASCII flowcharts.
 
 ### 1. The Cloud OTP Bridge (Online Mode)
 *Uses an ephemeral Google Apps Script solely for an initial 5-second handshake.*
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Host as Peer A (Host)
-    participant Signal as Tiny Signaling Script
-    participant Guest as Peer B (Guest)
-    
-    Host->>Host: Generate WebRTC Offer (SDP)
-    Host->>Signal: POST Offer with PIN (e.g., "secret45")
-    Note over Signal: Script holds data for seconds.
-    Guest->>Signal: GET Offer using PIN
-    Guest->>Guest: Apply Offer, Generate Answer (SDP)
-    Guest->>Signal: POST Answer to PIN
-    Host->>Signal: GET Answer
-    Note over Host, Guest: 🔒 Secure P2P DTLS Pipe Established
-    Host-xSignal: (Connection Abandoned)
-    Host<-->>Guest: Direct Encrypted Chat & Files
+```text
+[ Peer A (Host) ]                             [ Signaling Script ]                            [ Peer B (Guest) ]
+       │                                               │                                              │
+       │ 1. Generate WebRTC Offer (SDP)                │                                              │
+       │──────────────────────────────────────────────>│                                              │
+       │    POST Offer with PIN (e.g. "secret45")      │                                              │
+       │                                               │ (Holds data for 5s)                          │
+       │                                               │<─────────────────────────────────────────────│
+       │                                               │         GET Offer using PIN                  │
+       │                                               │                                              │
+       │                                               │               2. Apply Offer, Generate Answer│
+       │                                               │<─────────────────────────────────────────────│
+       │                                               │         POST Answer to PIN                   │
+       │<──────────────────────────────────────────────│                                              │
+       │              GET Answer                       │                                              │
+       │                                               X (Connection Abandoned)                       │
+       │                                                                                              │
+       │====================== 3. Secure P2P DTLS Pipe Established ===================================│
+       │<────────────────────────────────────────────────────────────────────────────────────────────>│
+       │                            Direct Encrypted Chat & Files                                     │
