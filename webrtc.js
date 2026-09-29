@@ -159,25 +159,27 @@ class P2PConnection {
     
     this.app.onFileTransferStart(fileId, item.file.name, item.file.size, true, item.bId, item.file);
 
-    const chunkSize = 16384; 
+    // FIX: Increased to 64KB for maximum WebRTC throughput speed
+    const chunkSize = 65536; 
     let offset = 0;
     this.activeTransfer = { id: fileId, aborted: false };
 
     while (offset < item.file.size && !this.activeTransfer.aborted) {
       if (this.dc.readyState !== 'open') break;
 
-      // FIX: Reverted to ultra-fast 5ms polling loop. 
-      // This bypasses browser bugs where the native 'bufferedamountlow' event silently fails to fire.
-      if (this.dc.bufferedAmount > this.dc.bufferedAmountLowThreshold) {
+      // FIX: Hybrid zero-latency backpressure loop
+      if (this.dc.bufferedAmount >= this.dc.bufferedAmountLowThreshold) {
         await new Promise(resolve => {
-          const pollQueue = () => {
+          let interval;
+          const check = () => {
             if (this.dc.readyState !== 'open' || this.dc.bufferedAmount <= this.dc.bufferedAmountLowThreshold) {
+              clearInterval(interval);
+              this.dc.removeEventListener('bufferedamountlow', check);
               resolve();
-            } else {
-              setTimeout(pollQueue, 5); 
             }
           };
-          pollQueue();
+          this.dc.addEventListener('bufferedamountlow', check);
+          interval = setInterval(check, 1); 
         });
       }
       
@@ -200,8 +202,14 @@ class P2PConnection {
     }
     
     this.app.onFileTransferComplete(fileId, null, !this.activeTransfer.aborted);
-    this.activeTransfer = null; 
-    this.processFileQueue();
+    // Queue is intentionally NOT processed here. We now strictly wait for the FILE_ACK to guarantee one-by-one integrity.
+  }
+  
+  onFileAck(id) {
+    if (this.activeTransfer && this.activeTransfer.id === id) {
+      this.activeTransfer = null;
+      this.processFileQueue(); // Resume queue strictly after peer confirmation
+    }
   }
 
   cancelActiveTransfer() { if (this.activeTransfer) this.activeTransfer.aborted = true; }
