@@ -119,6 +119,10 @@ const DrawController = {
     } else if (msg.type === Protocol.TYPES.DRAW_UNDO) {
       this.peerStrokes.pop();
       this.render();
+    } else if (msg.type === Protocol.TYPES.DRAW_CLEAR) {
+      // Safely wipe the peer strokes that were being drawn live, without touching local drawings
+      this.peerStrokes = [];
+      this.render();
     }
   },
 
@@ -139,7 +143,6 @@ const DrawController = {
   
   async share() {
     if (this.myStrokes.length === 0 && this.peerStrokes.length === 0) return;
-    
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = this.canvas.width; tempCanvas.height = this.canvas.height;
     const tCtx = tempCanvas.getContext('2d');
@@ -177,12 +180,21 @@ const DrawController = {
   },
 
   clear(isSelf) {
+    // Only wipe our unsent strokes.
     this.myStrokes = [];
-    this.peerStrokes = [];
     this.render();
     this.toggle(false);
+    
+    // Wipe them from the peer's screen instantly
+    if (isSelf && this.onSendCommand) {
+        this.onSendCommand(Protocol.createDrawCommand(Protocol.TYPES.DRAW_CLEAR));
+    }
+
     const tb = document.getElementById('draw-toolbar');
-    if(tb) tb.classList.add('hidden');
+    if(tb) {
+      tb.classList.add('hidden');
+      tb.classList.remove('collapsed');
+    }
     document.getElementById('btn-draw-canvas').classList.remove('active-green');
     document.getElementById('btn-draw-chat').classList.remove('active-green');
   },
