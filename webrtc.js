@@ -166,25 +166,18 @@ class P2PConnection {
     while (offset < item.file.size && !this.activeTransfer.aborted) {
       if (this.dc.readyState !== 'open') break;
 
-      // FIX: Replace inefficient timeout polling with exact event listeners to prevent loop starvation
-      if (this.dc.bufferedAmount >= this.dc.bufferedAmountLowThreshold) {
+      // FIX: Reverted to ultra-fast 5ms polling loop. 
+      // This bypasses browser bugs where the native 'bufferedamountlow' event silently fails to fire.
+      if (this.dc.bufferedAmount > this.dc.bufferedAmountLowThreshold) {
         await new Promise(resolve => {
-          const drainHandler = () => {
-            this.dc.removeEventListener('bufferedamountlow', drainHandler);
-            this.dc.removeEventListener('close', closeHandler);
-            resolve();
+          const pollQueue = () => {
+            if (this.dc.readyState !== 'open' || this.dc.bufferedAmount <= this.dc.bufferedAmountLowThreshold) {
+              resolve();
+            } else {
+              setTimeout(pollQueue, 5); 
+            }
           };
-          const closeHandler = () => {
-            this.dc.removeEventListener('bufferedamountlow', drainHandler);
-            this.dc.removeEventListener('close', closeHandler);
-            resolve();
-          };
-          
-          this.dc.addEventListener('bufferedamountlow', drainHandler);
-          this.dc.addEventListener('close', closeHandler);
-          
-          // Failsafe if it drained milliseconds before listener attached
-          if (this.dc.bufferedAmount < this.dc.bufferedAmountLowThreshold) drainHandler();
+          pollQueue();
         });
       }
       
@@ -198,7 +191,7 @@ class P2PConnection {
         this.app.onFileTransferProgress(fileId, (offset / item.file.size) * 100);
       } catch (err) {
         console.error("Transmission error: ", err);
-        break; // Break current file loop but allow queue to process the next
+        break; 
       }
     }
 
