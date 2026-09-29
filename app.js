@@ -4,6 +4,8 @@ const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwsBuyfATYfSCgs3
 let connection = null;
 let html5QrCode = null;
 let deferredPrompt = null;
+let activeReplyMsg = null;
+let qrFlashInterval = null;
 
 const animHTML = `
   <div class="link-animation">
@@ -14,7 +16,7 @@ const animHTML = `
 `;
 
 function createQRChunks(base64) {
-  const TOTAL_CHUNKS = App.settings.qrChunks;
+  const TOTAL_CHUNKS = 5; // Enforce chunking size
   const chunkSize = Math.ceil(base64.length / TOTAL_CHUNKS);
   const chunks = [];
   for(let i = 0; i < base64.length; i += chunkSize) chunks.push(base64.substring(i, i + chunkSize));
@@ -30,53 +32,34 @@ function extractCode(text) {
 const Synthesizer = {
   ctx: null,
   init() { if(!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); },
-  
   playPop() {
     if(!this.ctx || !App.settings.sound) return;
     const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator(); 
-    const gain = this.ctx.createGain();
+    const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
     osc.connect(gain); gain.connect(this.ctx.destination);
-    
-    osc.type = 'sine'; 
-    osc.frequency.setValueAtTime(800, t);
-    osc.frequency.exponentialRampToValueAtTime(400, t + 0.07);
-    
-    gain.gain.setValueAtTime(0, t); 
-    gain.gain.linearRampToValueAtTime(0.15, t + 0.01); 
-    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.07);
-    
+    osc.type = 'sine'; osc.frequency.setValueAtTime(800, t); osc.frequency.exponentialRampToValueAtTime(400, t + 0.07);
+    gain.gain.setValueAtTime(0, t); gain.gain.linearRampToValueAtTime(0.15, t + 0.01); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.07);
     osc.start(t); osc.stop(t + 0.1);
   },
-
   playSwoosh() {
     if(!this.ctx || !App.settings.sound) return;
     const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator(); 
-    const gain = this.ctx.createGain();
+    const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
     osc.connect(gain); gain.connect(this.ctx.destination);
-    
-    osc.type = 'sine'; 
-    osc.frequency.setValueAtTime(650, t);
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(0.15, t + 0.02);
-    gain.gain.linearRampToValueAtTime(0, t + 0.08);
-    
-    osc.frequency.setValueAtTime(850, t + 0.09);
-    gain.gain.setValueAtTime(0, t + 0.09);
-    gain.gain.linearRampToValueAtTime(0.15, t + 0.11);
-    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
-    
+    osc.type = 'sine'; osc.frequency.setValueAtTime(650, t);
+    gain.gain.setValueAtTime(0, t); gain.gain.linearRampToValueAtTime(0.15, t + 0.02); gain.gain.linearRampToValueAtTime(0, t + 0.08);
+    osc.frequency.setValueAtTime(850, t + 0.09); gain.gain.setValueAtTime(0, t + 0.09); gain.gain.linearRampToValueAtTime(0.15, t + 0.11); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
     osc.start(t); osc.stop(t + 0.35);
   }
 };
 
 const App = {
   container: document.getElementById('app-container'),
-  settings: { darkMode: false, useCloud: true, qrChunks: 3, ghostTyping: false, sound: true },
+  settings: { darkMode: false, useCloud: true, ghostTyping: false, sound: true },
   sessionTimer: null, sessionStartTime: 0,
   metricsInterval: null, lastMetrics: { rxBytes: 0, txBytes: 0 },
   activeIncomingFile: null, activeBatches: {},
+  isScrolledUp: false, unreadCount: 0,
 
   init() {
     window.addEventListener('popstate', (e) => {
@@ -94,14 +77,6 @@ const App = {
       App.renderState('IDLE', true);
     };
 
-    const qrSlider = document.getElementById('qr-slider');
-    if (qrSlider) {
-      qrSlider.oninput = (e) => {
-        App.settings.qrChunks = parseInt(e.target.value);
-        document.getElementById('qr-slider-val').textContent = App.settings.qrChunks;
-      };
-    }
-
     const btnInstall = document.getElementById('btn-install-pwa');
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault(); deferredPrompt = e; btnInstall.classList.remove('hidden');
@@ -113,6 +88,14 @@ const App = {
     let savedUsage = JSON.parse(localStorage.getItem('wchat_data') || '{"up":0,"down":0}');
     document.getElementById('data-counter').textContent = `${(savedUsage.up/(1024*1024)).toFixed(2)} MB ⬆ | ${(savedUsage.down/(1024*1024)).toFixed(2)} MB ⬇`;
 
+    // Global Click Listener for Context Menu
+    document.addEventListener('click', (e) => {
+      const ctxMenu = document.getElementById('context-menu');
+      if (!ctxMenu.classList.contains('hidden') && !ctxMenu.contains(e.target)) {
+        ctxMenu.classList.add('hidden');
+      }
+    });
+
     App.renderState('IDLE', true);
   },
 
@@ -121,13 +104,10 @@ const App = {
     const textEl = document.getElementById('custom-alert-text');
     const overlay = document.getElementById('custom-alert-overlay');
     if (overlay && titleEl && textEl) {
-        titleEl.textContent = title;
-        textEl.textContent = text;
+        titleEl.textContent = title; textEl.textContent = text;
         overlay.classList.remove('hidden');
         document.getElementById('custom-alert-btn').onclick = () => overlay.classList.add('hidden');
-    } else {
-        alert(`${title}: ${text}`);
-    }
+    } else { alert(`${title}: ${text}`); }
   },
 
   async stopScannerSafely() {
@@ -144,6 +124,7 @@ const App = {
     if (pushHistory) history.pushState({ view: state }, '', `#${state}`);
     App.container.innerHTML = ''; 
     App.stopScannerSafely();
+    clearInterval(qrFlashInterval);
     
     const modeSetting = document.getElementById('setting-row-mode');
     if (modeSetting) modeSetting.style.display = (state === 'CONNECTED') ? 'none' : 'flex';
@@ -187,9 +168,9 @@ const App = {
   renderScannerUI(expectedType, onSuccess) {
     const view = Utils.createElement('div', '', 'view idle-view');
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = `<h1 class="brand">Scan QR</h1><p>Point camera at the QR code(s).</p>`;
+    card.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><h1 class="brand" style="margin:0;">Scan QR</h1><button id="btn-switch-cam" class="icon-btn" title="Switch Lens" style="padding:4px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-11.83l5.67-5.67"/></svg></button></div><p>Point camera at the flashing QR.</p>`;
     
-    const instruction = Utils.createElement('div', 'Scan QR Code 1', 'scan-instruction');
+    const instruction = Utils.createElement('div', 'Awaiting stream...', 'scan-instruction');
     const readerWrapper = Utils.createElement('div'); readerWrapper.id = 'reader-container'; readerWrapper.style.display = 'none';
     card.appendChild(instruction); card.appendChild(readerWrapper);
 
@@ -200,19 +181,33 @@ const App = {
           if (parts.length >= 3) {
              const info = parts[1].split('/');
              const index = parseInt(info[0]) - 1; expectedParts = parseInt(info[1]);
-             if (!scannedParts[index]) scannedParts[index] = parts.slice(2).join(':'); 
-             const scannedCount = scannedParts.filter(Boolean).length;
-             if (scannedCount === expectedParts) { await App.stopScannerSafely(); instruction.textContent = "Connecting..."; onSuccess(scannedParts.join('')); } 
-             else { instruction.textContent = `Scanned ${scannedCount} of ${expectedParts}. Scan next!`; }
+             if (!scannedParts[index]) {
+                scannedParts[index] = parts.slice(2).join(':'); 
+                const scannedCount = scannedParts.filter(Boolean).length;
+                if (scannedCount === expectedParts) { await App.stopScannerSafely(); instruction.textContent = "Connecting..."; onSuccess(scannedParts.join('')); } 
+                else { instruction.textContent = `Captured ${scannedCount}/${expectedParts}... Keep steady.`; }
+             }
           }
        } else { await App.stopScannerSafely(); onSuccess(extractCode(text)); }
     };
 
+    let cameras = []; let currentCamIndex = 0;
     const startCam = async () => {
        await App.stopScannerSafely(); readerWrapper.style.display = 'block';
        html5QrCode = new Html5Qrcode("reader-container");
-       try { await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: (vw, vh) => ({ width: Math.min(vw, vh) * 0.8, height: Math.min(vw, vh) * 0.8 }) }, handleScan); } 
-       catch(e) { App.showAlert("Camera failed to load or permission was denied.", "Error"); }
+       try {
+         const devices = await Html5Qrcode.getCameras();
+         if(devices && devices.length > 0) {
+            cameras = devices; // Filter out front cameras if possible, but taking all for flexibility
+            const config = { fps: 15, qrbox: (vw, vh) => ({ width: Math.min(vw, vh) * 0.8, height: Math.min(vw, vh) * 0.8 }) };
+            await html5QrCode.start(cameras[currentCamIndex].id, config, handleScan);
+         }
+       } catch(e) { App.showAlert("Camera failed to load.", "Error"); }
+    };
+
+    const btnSwitchCam = card.querySelector('#btn-switch-cam');
+    btnSwitchCam.onclick = () => {
+      if(cameras.length > 1) { currentCamIndex = (currentCamIndex + 1) % cameras.length; startCam(); }
     };
 
     const btnCam = Utils.createElement('button', '📸 Open Camera', 'secondary'); btnCam.onclick = () => startCam();
@@ -223,27 +218,37 @@ const App = {
   },
 
   renderQRCarousel(container, base64Payload) {
-    const chunks = createQRChunks(base64Payload); let currentIndex = 0;
+    const chunks = createQRChunks(base64Payload); 
+    let currentIndex = 0;
+    let isPaused = false;
+    
     const qrWrap = Utils.createElement('div', '', 'qr-wrapper'); 
+    const qrBox = Utils.createElement('div', '', 'qr-box'); 
     const qrDiv = Utils.createElement('div'); qrDiv.id = 'qrcode'; 
-    qrWrap.appendChild(qrDiv);
+    qrBox.appendChild(qrDiv); qrWrap.appendChild(qrBox);
+    
+    const lblStatus = Utils.createElement('span', `Streaming...`, 'qr-status mt-10');
+    lblStatus.style.fontWeight = 'bold'; lblStatus.style.color = 'var(--text-sub)';
+    qrWrap.appendChild(lblStatus);
+
+    const updateQR = () => {
+      if(isPaused) return;
+      qrDiv.innerHTML = '';
+      new QRCode(qrDiv, { text: chunks[currentIndex], width: 220, height: 220, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
+      lblStatus.textContent = `Streaming Chunk ${currentIndex + 1} of ${chunks.length}`;
+      currentIndex = (currentIndex + 1) % chunks.length;
+    };
+
+    qrBox.onclick = () => {
+      isPaused = !isPaused;
+      lblStatus.textContent = isPaused ? `Paused on Chunk ${currentIndex || chunks.length} (Tap to resume)` : `Streaming...`;
+    };
 
     if(chunks.length > 1) {
-      const navWrap = Utils.createElement('div', '', 'qr-carousel');
-      const btnPrev = Utils.createElement('button', '❮', 'secondary qr-nav-btn'); const btnNext = Utils.createElement('button', '❯', 'secondary qr-nav-btn');
-      const lblStatus = Utils.createElement('span', `QR 1 of ${chunks.length}`, 'qr-status');
-      navWrap.appendChild(btnPrev); navWrap.appendChild(lblStatus); navWrap.appendChild(btnNext); qrWrap.appendChild(navWrap);
-
-      const updateQR = () => {
-        qrDiv.innerHTML = '';
-        new QRCode(qrDiv, { text: chunks[currentIndex], width: 250, height: 250, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L });
-        lblStatus.textContent = `QR ${currentIndex + 1} of ${chunks.length}`;
-        btnPrev.disabled = currentIndex === 0; btnNext.disabled = currentIndex === chunks.length - 1;
-      };
-      btnPrev.onclick = () => { if(currentIndex > 0) { currentIndex--; updateQR(); }};
-      btnNext.onclick = () => { if(currentIndex < chunks.length - 1) { currentIndex++; updateQR(); }};
-      setTimeout(updateQR, 100);
-    } else { setTimeout(() => new QRCode(qrDiv, { text: chunks[0], width: 250, height: 250, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L }), 100); }
+      updateQR();
+      qrFlashInterval = setInterval(updateQR, 400); // 400ms Fountain loop
+    } else { setTimeout(() => new QRCode(qrDiv, { text: chunks[0], width: 220, height: 220, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L }), 100); }
+    
     container.appendChild(qrWrap);
   },
 
@@ -279,7 +284,6 @@ const App = {
       const data = await res.json();
       if (!data.payload) throw new Error("Room not found.");
       
-      // Safety validation check implemented to prevent 'reading i from null' crash[cite: 1, 2]
       const offerSignal = Protocol.validateSignal(data.payload, 'offer');
       if (!offerSignal) throw new Error("Room offer has expired or is invalid.");
 
@@ -297,7 +301,7 @@ const App = {
       connection = new P2PConnection(App);
       const offerStr = await connection.generateOffer();
       const base64 = Utils.encodeBase64Url(offerStr);
-      card.innerHTML = '<h1 class="brand">Offline Room</h1><p>Share this QR to connect</p>';
+      card.innerHTML = '<h1 class="brand">Offline Room</h1><p>Hold scanner steady to capture the stream</p>';
       App.renderQRCarousel(card, base64);
       setTimeout(() => {
         const btnScan = Utils.createElement('button', 'Provide Answer Code');
@@ -320,7 +324,7 @@ const App = {
       connection = new P2PConnection(App);
       const ansStr = await connection.acceptOfferAndGenerateAnswer(offerSignal);
       const base64 = Utils.encodeBase64Url(ansStr);
-      card.innerHTML = '<h1 class="brand">Send Answer</h1><p>Scan this back to the Host</p>';
+      card.innerHTML = '<h1 class="brand">Send Answer</h1><p>Hold scanner steady</p>';
       App.renderQRCarousel(card, base64);
     }, 100);
   },
@@ -336,20 +340,6 @@ const App = {
     document.getElementById('btn-set-dir').onclick = async () => { diceMenu.classList.remove('active'); const ok = await FileSystem.requestDirectory(); if(ok) document.getElementById('btn-set-dir').style.color = '#10b981'; };
     document.getElementById('btn-screen-cast').onclick = () => { diceMenu.classList.remove('active'); connection.toggleScreenCasting(); };
     document.getElementById('btn-chat-settings').onclick = () => { diceMenu.classList.remove('active'); document.getElementById('settings-overlay').classList.remove('hidden'); };
-
-    const btnFullscreen = document.getElementById('btn-fullscreen-cast');
-    if (btnFullscreen) {
-       btnFullscreen.onclick = () => {
-         const cont = document.getElementById('media-container');
-         if (!document.fullscreenElement) {
-            if(cont.requestFullscreen) cont.requestFullscreen();
-            else if(cont.webkitRequestFullscreen) cont.webkitRequestFullscreen();
-         } else {
-            if(document.exitFullscreen) document.exitFullscreen();
-            else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
-         }
-       };
-    }
 
     const fileInput = document.getElementById('file-input');
     document.getElementById('btn-file').onclick = () => { diceMenu.classList.remove('active'); fileInput.click(); };
@@ -373,19 +363,59 @@ const App = {
     DrawController.init('chat-canvas', (cmdStr) => connection.sendPayload(cmdStr));
     const drawToolbar = document.getElementById('draw-toolbar');
     
-    document.getElementById('btn-draw-toggle').onclick = () => { diceMenu.classList.remove('active'); DrawController.toggle(!DrawController.isActive); drawToolbar.classList.toggle('hidden', !DrawController.isActive); };
+    const toggleDraw = (mode) => {
+      diceMenu.classList.remove('active');
+      const btnCanvas = document.getElementById('btn-draw-canvas');
+      const btnChat = document.getElementById('btn-draw-chat');
+      
+      if (DrawController.isActive && DrawController.currentMode === mode) {
+        // Toggle OFF
+        DrawController.toggle(false);
+        drawToolbar.classList.add('hidden');
+        btnCanvas.classList.remove('active-green'); btnChat.classList.remove('active-green');
+      } else {
+        // Toggle ON / Switch
+        DrawController.toggle(true, mode);
+        drawToolbar.classList.remove('hidden');
+        if(mode === 'canvas') { btnCanvas.classList.add('active-green'); btnChat.classList.remove('active-green'); }
+        else { btnChat.classList.add('active-green'); btnCanvas.classList.remove('active-green'); }
+      }
+    };
+    
+    document.getElementById('btn-draw-canvas').onclick = () => toggleDraw('canvas');
+    document.getElementById('btn-draw-chat').onclick = () => toggleDraw('chat');
+    
     document.querySelectorAll('.color-swatch').forEach(el => { el.onclick = () => { document.querySelector('.color-swatch.active').classList.remove('active'); el.classList.add('active'); DrawController.setColor(el.dataset.color); }; });
-    
     document.getElementById('btn-draw-undo').onclick = () => DrawController.undo(true);
-    
-    const btnDrawClear = document.getElementById('btn-draw-clear');
-    if (btnDrawClear) btnDrawClear.onclick = () => DrawController.clear(true);
-    
-    const btnDrawSend = document.getElementById('btn-draw-send');
-    if (btnDrawSend) btnDrawSend.onclick = () => DrawController.sendAsMessage(false);
-    
-    document.getElementById('btn-draw-close').onclick = () => { DrawController.toggle(false); drawToolbar.classList.add('hidden'); };
+    document.getElementById('btn-draw-download').onclick = () => DrawController.download();
+    document.getElementById('btn-draw-share').onclick = () => DrawController.share();
+    document.getElementById('btn-draw-send').onclick = () => DrawController.sendAsMessage(false);
+    document.getElementById('btn-draw-close').onclick = () => { DrawController.clear(true); };
 
+    // Scroll Logic for Unread Badge
+    const log = document.getElementById('chat-log');
+    const scrollDownBtn = document.getElementById('scroll-down-btn');
+    const scrollBadge = document.getElementById('scroll-badge');
+    
+    log.addEventListener('scroll', () => {
+      const maxScroll = log.scrollHeight - log.clientHeight;
+      App.isScrolledUp = maxScroll - log.scrollTop > 50;
+      if (!App.isScrolledUp) {
+         App.unreadCount = 0;
+         scrollBadge.classList.add('hidden');
+         scrollDownBtn.classList.add('hidden');
+      } else {
+         scrollDownBtn.classList.remove('hidden');
+      }
+    });
+
+    scrollDownBtn.onclick = () => {
+      log.scrollTop = log.scrollHeight;
+      App.unreadCount = 0;
+      scrollBadge.classList.add('hidden');
+    };
+
+    // Chat Input Logic
     const input = document.getElementById('chat-input'); let ghostTimeout;
     input.addEventListener('input', function() {
       this.style.height = '44px';
@@ -396,30 +426,45 @@ const App = {
       }
     });
     
+    document.getElementById('close-reply').onclick = () => {
+      activeReplyMsg = null;
+      document.getElementById('reply-preview').classList.add('hidden');
+    };
+
     const sendBtn = document.getElementById('btn-send');
     const sendMsg = () => {
       const txt = input.value.trim(); if (!txt || !connection) return;
-      const msg = Protocol.createChatMessage(txt); connection.sendPayload(msg);
+      const msg = Protocol.createChatMessage(txt, activeReplyMsg); connection.sendPayload(msg);
       if(App.settings.ghostTyping) connection.sendPayload(Protocol.createGhostTyping('', false));
       App.renderMessage(JSON.parse(msg), true); Synthesizer.playPop(); 
       input.value = ''; input.style.height = '44px';
+      
+      activeReplyMsg = null;
+      document.getElementById('reply-preview').classList.add('hidden');
     };
 
     sendBtn.addEventListener('pointerdown', (e) => e.preventDefault()); 
     sendBtn.onclick = (e) => { e.preventDefault(); sendMsg(); };
 
-    // Device checks implemented to dictate enter key behavior[cite: 2]
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
     input.onkeydown = (e) => { 
       if (e.key === 'Enter' && !e.shiftKey) { 
-        if (isMobile) {
-          // Allows standard mobile return functionality.
-          return;
-        } else {
-          e.preventDefault(); 
-          sendMsg(); 
-        }
+        if (isMobile) return; else { e.preventDefault(); sendMsg(); }
       } 
+    };
+    
+    // Context Menu Logic
+    const ctxMenu = document.getElementById('context-menu');
+    document.getElementById('ctx-copy').onclick = () => {
+      if(ctxMenu.dataset.text) navigator.clipboard.writeText(ctxMenu.dataset.text);
+      ctxMenu.classList.add('hidden');
+    };
+    document.getElementById('ctx-reply').onclick = () => {
+      activeReplyMsg = { id: ctxMenu.dataset.id, text: ctxMenu.dataset.text };
+      document.getElementById('reply-preview-text').textContent = activeReplyMsg.text;
+      document.getElementById('reply-preview').classList.remove('hidden');
+      ctxMenu.classList.add('hidden');
+      input.focus();
     };
     
     App.receiptObserver = new IntersectionObserver((entries) => {
@@ -465,7 +510,7 @@ const App = {
     if (msg.type === Protocol.TYPES.CHAT) { App.renderMessage(msg, false); Synthesizer.playSwoosh(); }
     else if (msg.type === Protocol.TYPES.GHOST) {
       const cont = document.getElementById('ghost-typing-container'); const txt = document.getElementById('ghost-text-preview');
-      if (msg.active && msg.text) { cont.classList.remove('hidden'); txt.textContent = msg.text; document.getElementById('chat-log').scrollTop = document.getElementById('chat-log').scrollHeight; } 
+      if (msg.active && msg.text) { cont.classList.remove('hidden'); txt.textContent = msg.text; if(!App.isScrolledUp) document.getElementById('chat-log').scrollTop = document.getElementById('chat-log').scrollHeight; } 
       else { cont.classList.add('hidden'); txt.textContent = ''; }
     }
     else if ([Protocol.TYPES.DRAW_START, Protocol.TYPES.DRAW_PT, Protocol.TYPES.DRAW_UNDO].includes(msg.type)) DrawController.handleNetworkCommand(msg);
@@ -481,8 +526,49 @@ const App = {
     const log = document.getElementById('chat-log');
     const wrap = Utils.createElement('div', '', `msg-wrap ${isSelf ? 'self' : 'peer'}`);
     wrap.id = msg.id;
-    wrap.innerHTML = `<div class="msg-bubble">${msg.text}</div><div class="msg-meta">${new Date(msg.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}${isSelf ? `<span class="msg-ticks" id="tick-${msg.id}"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg></span>` : ''}</div>`;
-    log.appendChild(wrap); log.scrollTop = log.scrollHeight;
+    
+    // Check for single emoji
+    const txtTrimmed = msg.text.trim();
+    const isSingleEmoji = Array.from(txtTrimmed).length === 1 && /^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+$/u.test(txtTrimmed);
+    
+    let html = `<div class="msg-bubble ${isSingleEmoji ? 'single-emoji' : ''}">`;
+    if (msg.reply && !isSingleEmoji) {
+      html += `<div class="msg-quote">${msg.reply.text}</div>`;
+    }
+    html += `${msg.text}</div><div class="msg-meta">${new Date(msg.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}${isSelf ? `<span class="msg-ticks" id="tick-${msg.id}"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg></span>` : ''}</div>`;
+    
+    wrap.innerHTML = html;
+    
+    // Context menu click listener
+    const bubble = wrap.querySelector('.msg-bubble');
+    if(!isSingleEmoji) {
+       bubble.addEventListener('click', (e) => {
+         e.stopPropagation();
+         const ctxMenu = document.getElementById('context-menu');
+         ctxMenu.dataset.id = msg.id; ctxMenu.dataset.text = msg.text;
+         
+         const rect = bubble.getBoundingClientRect();
+         let y = rect.bottom + 5;
+         let x = rect.left;
+         if (isSelf) x = rect.right - 120; // Align right for self
+         
+         ctxMenu.style.top = `${Math.min(y, window.innerHeight - 80)}px`;
+         ctxMenu.style.left = `${Math.max(10, Math.min(x, window.innerWidth - 130))}px`;
+         ctxMenu.classList.remove('hidden');
+       });
+    }
+
+    log.appendChild(wrap);
+    
+    if (App.isScrolledUp && !isSelf) {
+      App.unreadCount++;
+      const scrollBadge = document.getElementById('scroll-badge');
+      scrollBadge.textContent = App.unreadCount;
+      scrollBadge.classList.remove('hidden');
+    } else {
+      log.scrollTop = log.scrollHeight;
+    }
+
     if (!isSelf) { wrap.dataset.status = 'deliv'; App.receiptObserver.observe(wrap); }
   },
 
@@ -492,7 +578,8 @@ const App = {
     wrap.innerHTML = `<div class="msg-bubble" style="padding: 4px; overflow: hidden; background: transparent; border: none; box-shadow: none;">
                         <img src="${dataUrl}" class="media-preview canvas-snapshot">
                       </div><div class="msg-meta" style="justify-content:${isSelf ? 'flex-end' : 'flex-start'};">Drawing</div>`;
-    log.appendChild(wrap); log.scrollTop = log.scrollHeight;
+    log.appendChild(wrap); 
+    if(!App.isScrolledUp || isSelf) log.scrollTop = log.scrollHeight;
   },
 
   updateReceipt(id, status) {
@@ -505,10 +592,7 @@ const App = {
     let stream = null; let fileHandle = null;
     if (FileSystem.sessionFolder) {
       const res = await FileSystem.createWritable(msg.name);
-      if (res) { 
-        stream = res.stream || res; 
-        fileHandle = res.fileHandle || null; 
-      }
+      if (res) { stream = res.stream || res; fileHandle = res.fileHandle || null; }
     }
     
     if(msg.bId && msg.bTot > 1 && !App.activeBatches[msg.bId]) {
@@ -517,7 +601,7 @@ const App = {
       const wrap = Utils.createElement('div', '', 'msg-wrap peer'); wrap.id = 'batch-' + msg.bId;
       wrap.innerHTML = `<div class="msg-bubble batch-folder"><div class="batch-header">📁 Receiving ${msg.bTot} Files <span>▼</span></div><div class="batch-list" id="blist-${msg.bId}"></div></div>`;
       wrap.querySelector('.batch-header').onclick = (ev) => ev.currentTarget.nextElementSibling.classList.toggle('open');
-      log.appendChild(wrap); log.scrollTop = log.scrollHeight;
+      log.appendChild(wrap); if(!App.isScrolledUp) log.scrollTop = log.scrollHeight;
       App.activeBatches[msg.bId].ui = document.getElementById(`blist-${msg.bId}`);
     }
 
@@ -528,11 +612,8 @@ const App = {
   async onBinaryChunkReceived(buffer) {
     const f = App.activeIncomingFile; if(!f) return;
     f.received += buffer.byteLength;
-    if (f.stream) {
-       f.writeQueue = f.writeQueue.then(() => f.stream.write(buffer));
-    } else { 
-       f.chunks.push(buffer); 
-    }
+    if (f.stream) f.writeQueue = f.writeQueue.then(() => f.stream.write(buffer));
+    else f.chunks.push(buffer); 
     App.onFileTransferProgress(f.id, (f.received / f.size) * 100);
   },
 
@@ -544,8 +625,7 @@ const App = {
       await f.writeQueue;
       await f.stream.close();
       if (f.fileHandle && (f.mime.startsWith('image/') || f.mime.startsWith('video/') || f.mime.startsWith('audio/'))) {
-         const file = await f.fileHandle.getFile();
-         url = URL.createObjectURL(file);
+         const file = await f.fileHandle.getFile(); url = URL.createObjectURL(file);
       }
     }
     else if (!aborted) {
@@ -584,11 +664,10 @@ const App = {
     const target = (batchId && App.activeBatches[batchId]?.ui) ? App.activeBatches[batchId].ui : log;
     if (target === log) { 
        const wrap = Utils.createElement('div', '', `msg-wrap ${isUpload ? 'self' : 'peer'}`); wrap.appendChild(el); target.appendChild(wrap); 
-    } 
-    else { 
+    } else { 
        el.style.width = '100%'; el.style.border = '1px solid var(--border)'; target.appendChild(el); 
     }
-    log.scrollTop = log.scrollHeight;
+    if(!App.isScrolledUp) log.scrollTop = log.scrollHeight;
   },
 
   onFileTransferProgress(id, percent) {
@@ -599,27 +678,18 @@ const App = {
   onFileTransferComplete(id, url, success, mimeType = '') {
     const box = document.getElementById(`ui-f-${id}`); if(!box) return;
     const txt = document.getElementById(`text-${id}`); const bar = document.getElementById(`prog-${id}`);
-    
     if(success && bar) bar.style.width = '100%';
     if(!success) { if(txt) txt.textContent = '❌ Cancelled'; return; }
-    
     if(txt) txt.innerHTML = (FileSystem.sessionFolder ? 'Saved' : 'Complete') + ' <span style="color:#10b981;">✔</span>';
-
     const cancelBtn = box.querySelector('.btn-cancel'); if(cancelBtn) cancelBtn.remove();
-    
-    if (url && !box.querySelector('.media-preview') && !box.querySelector('.media-preview-audio')) {
-       App._insertMediaPreview(box, url, mimeType);
-    }
+    if (url && !box.querySelector('.media-preview') && !box.querySelector('.media-preview-audio')) { App._insertMediaPreview(box, url, mimeType); }
   },
 
   onScreenCastReceived(stream) {
-    let cont = document.getElementById('media-container');
-    cont.classList.remove('hidden');
+    let cont = document.getElementById('media-container'); cont.classList.remove('hidden');
     let video = document.getElementById('remote-screen');
     if (!video) {
-      video = document.createElement('video'); video.id = 'remote-screen';
-      video.autoplay = true; video.playsInline = true; video.muted = true;
-      cont.appendChild(video);
+      video = document.createElement('video'); video.id = 'remote-screen'; video.autoplay = true; video.playsInline = true; video.muted = true; cont.appendChild(video);
     }
     video.srcObject = stream;
   }
