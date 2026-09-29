@@ -1,5 +1,5 @@
 // sw.js - Resilient Desktop & Mobile Offline PWA Cache
-const CACHE_NAME = 'webchat-v8';
+const CACHE_NAME = 'webchat-v9';
 const ASSETS = [
   './',
   './index.html',
@@ -20,7 +20,6 @@ self.addEventListener('install', (e) => {
   self.skipWaiting();
   e.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      // Prevents 1 missing file or 404 from nuking the entire cache
       return Promise.allSettled(
         ASSETS.map((url) =>
           cache.add(url).catch((err) => console.warn(`Failed to cache ${url}:`, err))
@@ -40,7 +39,6 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // 1. Desktop & Mobile Navigation Requests (App Launch / Refresh)
   if (e.request.mode === 'navigate') {
     e.respondWith(
       caches.match('./index.html')
@@ -51,12 +49,10 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // 2. Resource Requests (Scripts, CSS, Icons)
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((cachedResponse) => {
       if (cachedResponse) return cachedResponse;
       
-      // If not in cache and offline, don't crash - fallback safely
       return fetch(e.request).catch(() => {
         if (e.request.destination === 'document') {
           return caches.match('./index.html');
