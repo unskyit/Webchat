@@ -84,6 +84,10 @@ class P2PConnection {
   
   async acceptAnswer(answerSignal) { 
     if (answerSignal.i !== this.sessionId) throw new Error("ERR_SESSION_MISMATCH"); 
+    
+    // FIX: Block consecutive resolution calls to immediately halt "InvalidStateError"
+    if (this.pc.signalingState !== 'have-local-offer') return; 
+    
     await this.pc.setRemoteDescription(new RTCSessionDescription(answerSignal.s)); 
   }
   
@@ -159,27 +163,22 @@ class P2PConnection {
     
     this.app.onFileTransferStart(fileId, item.file.name, item.file.size, true, item.bId, item.file);
 
-    // FIX: Increased to 64KB for maximum WebRTC throughput speed
-    const chunkSize = 65536; 
+    // FIX: Explicitly revert to 16KB to prevent silent truncations on mobile implementations
+    const chunkSize = 16384; 
     let offset = 0;
     this.activeTransfer = { id: fileId, aborted: false };
 
     while (offset < item.file.size && !this.activeTransfer.aborted) {
       if (this.dc.readyState !== 'open') break;
 
-      // FIX: Hybrid zero-latency backpressure loop
+      // FIX: Solid, non-locking polling function
       if (this.dc.bufferedAmount >= this.dc.bufferedAmountLowThreshold) {
         await new Promise(resolve => {
-          let interval;
           const check = () => {
-            if (this.dc.readyState !== 'open' || this.dc.bufferedAmount <= this.dc.bufferedAmountLowThreshold) {
-              clearInterval(interval);
-              this.dc.removeEventListener('bufferedamountlow', check);
-              resolve();
-            }
+            if (this.dc.readyState !== 'open' || this.dc.bufferedAmount <= this.dc.bufferedAmountLowThreshold) resolve();
+            else setTimeout(check, 5); 
           };
-          this.dc.addEventListener('bufferedamountlow', check);
-          interval = setInterval(check, 1); 
+          check();
         });
       }
       
@@ -202,13 +201,12 @@ class P2PConnection {
     }
     
     this.app.onFileTransferComplete(fileId, null, !this.activeTransfer.aborted);
-    // Queue is intentionally NOT processed here. We now strictly wait for the FILE_ACK to guarantee one-by-one integrity.
   }
   
   onFileAck(id) {
     if (this.activeTransfer && this.activeTransfer.id === id) {
       this.activeTransfer = null;
-      this.processFileQueue(); // Resume queue strictly after peer confirmation
+      this.processFileQueue(); 
     }
   }
 
