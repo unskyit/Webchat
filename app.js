@@ -87,7 +87,6 @@ const App = {
     document.getElementById('toggle-theme').onchange = (e) => { 
       App.settings.darkMode = e.target.checked; 
       document.body.className = App.settings.darkMode ? 'dark-mode' : 'light-mode'; 
-      // Safely map status bar color dynamically
       const meta = document.getElementById('meta-theme-color');
       if (meta) meta.setAttribute("content", App.settings.darkMode ? "#000000" : "#ffffff");
     };
@@ -118,7 +117,6 @@ const App = {
     let savedUsage = JSON.parse(localStorage.getItem('wchat_data') || '{"up":0,"down":0}');
     document.getElementById('data-counter').textContent = `${(savedUsage.up/(1024*1024)).toFixed(2)} MB ⬆ | ${(savedUsage.down/(1024*1024)).toFixed(2)} MB ⬇`;
 
-    // Global Click Listener for Context Menu
     document.addEventListener('click', (e) => {
       const ctxMenu = document.getElementById('context-menu');
       if (!ctxMenu.classList.contains('hidden') && !ctxMenu.contains(e.target)) {
@@ -126,7 +124,6 @@ const App = {
       }
     });
 
-    // Boot audio system to prep for background usage
     document.addEventListener('pointerdown', () => KeepAlive.init(), { once: true });
 
     App.renderState('IDLE', true);
@@ -171,7 +168,7 @@ const App = {
       App.buildIdleView();
     }
     else if (state === 'CONNECTED') {
-      KeepAlive.start(); // Initiates invisible silence loop for PWA backgrounding
+      KeepAlive.start(); 
       headerActions.innerHTML = `<button id="btn-end-head" class="btn-danger" style="padding: 6px 12px; margin: 0; width: auto; font-size: 0.9rem;">End Chat</button>`;
       document.getElementById('btn-end-head').onclick = () => { if(connection) connection.destroy(); App.renderState('IDLE'); };
       App.buildChatView();
@@ -204,7 +201,6 @@ const App = {
     const view = Utils.createElement('div', '', 'view idle-view');
     const card = Utils.createElement('div', '', 'card');
     
-    // Updated Pill UI for cleaner Camera Switch
     card.innerHTML = `<div style="display:flex; flex-direction:column; align-items:center; margin-bottom:15px; gap: 10px;">
                         <h1 class="brand" style="margin:0;">Scan QR</h1>
                         <button id="btn-switch-cam" class="pill-btn hidden">🔄 Switch Lens</button>
@@ -449,7 +445,6 @@ const App = {
     document.getElementById('btn-draw-send').onclick = () => DrawController.sendAsMessage(false);
     document.getElementById('btn-draw-close').onclick = () => { DrawController.clear(true); };
 
-    // Scroll Logic for Unread Badge
     const log = document.getElementById('chat-log');
     const scrollDownBtn = document.getElementById('scroll-down-btn');
     const scrollBadge = document.getElementById('scroll-badge');
@@ -472,7 +467,6 @@ const App = {
       scrollBadge.classList.add('hidden');
     };
 
-    // Chat Input Logic
     const input = document.getElementById('chat-input'); let ghostTimeout;
     input.addEventListener('input', function() {
       this.style.height = '44px';
@@ -510,7 +504,6 @@ const App = {
       } 
     };
     
-    // Context Menu Logic
     const ctxMenu = document.getElementById('context-menu');
     document.getElementById('ctx-copy').onclick = () => {
       if(ctxMenu.dataset.text) navigator.clipboard.writeText(ctxMenu.dataset.text);
@@ -667,13 +660,20 @@ const App = {
   async onBinaryChunkReceived(buffer) {
     const f = App.activeIncomingFile; if(!f) return;
     
-    // FIX: Clone the buffer immediately to prevent the browser from 
-    // recycling this memory block and overwriting our chunks before they are saved.
     const safeBuffer = buffer.slice(0); 
-    
     f.received += safeBuffer.byteLength;
-    if (f.stream) f.writeQueue = f.writeQueue.then(() => f.stream.write(safeBuffer));
-    else f.chunks.push(safeBuffer); 
+    
+    if (f.stream) {
+        f.writeQueue = f.writeQueue
+            .then(() => f.stream.write(safeBuffer))
+            .catch(err => {
+                console.warn("Disk write failed, reverting to RAM chunking:", err);
+                f.stream = null;
+                f.chunks.push(safeBuffer); 
+            });
+    } else {
+        f.chunks.push(safeBuffer); 
+    }
     
     App.onFileTransferProgress(f.id, (f.received / f.size) * 100);
   },
