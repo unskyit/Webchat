@@ -3,11 +3,14 @@
 const FileSystem = {
   directoryHandle: null,
   sessionFolder: null,
-  isSupported: 'showDirectoryPicker' in window,
+  
+  // FIX: Explicitly disable on Mobile. Mobile OS sandboxing (Android Scoped Storage) 
+  // traps API-saved files in invisible system folders. We want to force the native OS Download Manager.
+  isSupported: 'showDirectoryPicker' in window && !(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)),
 
   async requestDirectory() {
     if (!this.isSupported) {
-      alert("Direct disk saving is not supported on this browser. Files will save via standard downloads.");
+      alert("Direct folder selection is restricted on mobile devices. Files will automatically route to your public Downloads folder.");
       return false;
     }
     try {
@@ -28,7 +31,7 @@ const FileSystem = {
       const fileHandle = await this.sessionFolder.getFileHandle(filename, { create: true });
       // Returns a FileSystemWritableFileStream to pipe chunks directly to disk
       const stream = await fileHandle.createWritable();
-      return { stream, fileHandle }; // FIX: Return handle to generate media preview later
+      return { stream, fileHandle }; 
     } catch (e) {
       console.error("Failed to create writable stream:", e);
       return null;
