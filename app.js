@@ -15,13 +15,11 @@ const animHTML = `
   </div>
 `;
 
-// Background WakeLock Hack to prevent disconnects on PWA minimization
 const KeepAlive = {
   audio: null,
   init() {
     if(!this.audio) {
       this.audio = document.createElement('audio');
-      // 1 sample silent WAV embedded to trick OS into keeping process active
       this.audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'; 
       this.audio.loop = true;
     }
@@ -299,14 +297,21 @@ const App = {
     try {
       const offerStr = await connection.generateOffer();
       await fetch(APP_SCRIPT_URL, { method: 'POST', body: JSON.stringify({ room: pin, type: 'offer', payload: offerStr }) });
+      
+      // FIX: Secure pooling logic to prevent concurrent execution overwrites
+      let polling = true;
       const poll = setInterval(async () => {
-        const res = await fetch(`${APP_SCRIPT_URL}?room=${pin}&type=get_answer`);
-        const data = await res.json();
-        if (data.payload) { 
-          clearInterval(poll); 
-          const answerSignal = Protocol.validateSignal(data.payload, 'answer'); 
-          if (answerSignal) connection.acceptAnswer(answerSignal); 
-        }
+        if(!polling) return;
+        try {
+          const res = await fetch(`${APP_SCRIPT_URL}?room=${pin}&type=get_answer`);
+          const data = await res.json();
+          if (data.payload && polling) { 
+            polling = false;
+            clearInterval(poll); 
+            const answerSignal = Protocol.validateSignal(data.payload, 'answer'); 
+            if (answerSignal) connection.acceptAnswer(answerSignal); 
+          }
+        } catch(e) {}
       }, 3000);
     } catch(e) { App.showAlert("Network failed. Ensure you are connected to the internet.", "Network Error"); App.renderState('IDLE'); }
   },
@@ -568,6 +573,7 @@ const App = {
     else if (msg.type === Protocol.TYPES.FILE_START) App.onIncomingFileStart(msg);
     else if (msg.type === Protocol.TYPES.FILE_END) App.onIncomingFileEnd(msg.id);
     else if (msg.type === Protocol.TYPES.FILE_CANCEL) App.onIncomingFileEnd(msg.id, true);
+    else if (msg.type === Protocol.TYPES.FILE_ACK) { if(connection) connection.onFileAck(msg.id); }
     else if (msg.type === Protocol.TYPES.RECEIPT) App.updateReceipt(msg.id, msg.status);
     else if (msg.type.startsWith('screen_')) connection.handleScreenSignal(msg);
   },
@@ -679,25 +685,41 @@ const App = {
   },
 
   async onIncomingFileEnd(id, aborted = false) {
-    const f = App.activeIncomingFile; if(!f || f.id !== id) return;
+    const f = App.activeIncomingFile; 
+    
+    if(!f || f.id !== id) {
+       if(connection) connection.sendPayload(JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.FILE_ACK, id: id }));
+       return; 
+    }
+    
+    App.activeIncomingFile = null;
     let url = null;
     
-    if (f.stream) {
-      await f.writeQueue;
-      await f.stream.close();
-      if (f.fileHandle && (f.mime.startsWith('image/') || f.mime.startsWith('video/') || f.mime.startsWith('audio/'))) {
-         const file = await f.fileHandle.getFile(); url = URL.createObjectURL(file);
+    // FIX: A bulletproof try/finally guarantees the ACK is always dispatched 
+    // to the sender, completely preventing the queue from getting permanently stuck.
+    try {
+      if (f.stream) {
+        await f.writeQueue.catch(e => console.warn(e));
+        try { await f.stream.close(); } catch(e){}
+        if (f.fileHandle && (f.mime.startsWith('image/') || f.mime.startsWith('video/') || f.mime.startsWith('audio/'))) {
+           try { const file = await f.fileHandle.getFile(); url = URL.createObjectURL(file); } catch(e){}
+        }
+      }
+      else if (!aborted) {
+        const blob = new Blob(f.chunks, {type: f.mime || 'application/octet-stream'}); 
+        url = URL.createObjectURL(blob);
+        if(!f.mime.startsWith('image/') && !f.mime.startsWith('video/') && !f.mime.startsWith('audio/')) { 
+           const a = document.createElement('a'); a.href = url; a.download = f.name; a.click(); 
+        }
+      }
+    } catch (err) {
+      console.error("Error finalizing file:", err);
+    } finally {
+      App.onFileTransferComplete(id, url, !aborted, f.mime);
+      if(connection) {
+         connection.sendPayload(JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.FILE_ACK, id: id }));
       }
     }
-    else if (!aborted) {
-      const blob = new Blob(f.chunks, {type: f.mime || 'application/octet-stream'}); url = URL.createObjectURL(blob);
-      if(!f.mime.startsWith('image/') && !f.mime.startsWith('video/') && !f.mime.startsWith('audio/')) { 
-         const a = document.createElement('a'); a.href = url; a.download = f.name; a.click(); 
-      }
-    }
-    
-    App.onFileTransferComplete(id, url, !aborted, f.mime);
-    App.activeIncomingFile = null;
   },
 
   _insertMediaPreview(box, url, mimeType) {
