@@ -23,7 +23,6 @@ const Protocol = {
     } catch (e) { return null; } 
   },
   
-  // Updated to include replyTo
   createChatMessage: (text, replyTo = null) => JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.CHAT, id: Utils.generateId(), text: text.slice(0, Protocol.MAX_MESSAGE_LENGTH), reply: replyTo, ts: Date.now() }),
   createGhostTyping: (text, isTyping) => JSON.stringify({ v: Protocol.VERSION, type: Protocol.TYPES.GHOST, text: text.slice(0, 500), active: isTyping }),
   createDrawCommand: (type) => JSON.stringify({ v: Protocol.VERSION, type: type }),
