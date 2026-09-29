@@ -15,8 +15,24 @@ const animHTML = `
   </div>
 `;
 
+// Background WakeLock Hack to prevent disconnects on PWA minimization
+const KeepAlive = {
+  audio: null,
+  init() {
+    if(!this.audio) {
+      this.audio = document.createElement('audio');
+      // 1 sample silent WAV embedded to trick OS into keeping process active
+      this.audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'; 
+      this.audio.loop = true;
+    }
+    this.audio.play().then(() => this.audio.pause()).catch(e=>{});
+  },
+  start() { if(this.audio) this.audio.play().catch(e=>{}); },
+  stop() { if(this.audio) this.audio.pause(); }
+};
+
 function createQRChunks(base64) {
-  const TOTAL_CHUNKS = 5; // Enforce chunking size
+  const TOTAL_CHUNKS = App.settings.qrChunks; 
   const chunkSize = Math.ceil(base64.length / TOTAL_CHUNKS);
   const chunks = [];
   for(let i = 0; i < base64.length; i += chunkSize) chunks.push(base64.substring(i, i + chunkSize));
@@ -55,7 +71,7 @@ const Synthesizer = {
 
 const App = {
   container: document.getElementById('app-container'),
-  settings: { darkMode: false, useCloud: true, ghostTyping: false, sound: true },
+  settings: { darkMode: false, useCloud: true, qrChunks: 15, ghostTyping: false, sound: true },
   sessionTimer: null, sessionStartTime: 0,
   metricsInterval: null, lastMetrics: { rxBytes: 0, txBytes: 0 },
   activeIncomingFile: null, activeBatches: {},
@@ -68,7 +84,13 @@ const App = {
     });
 
     document.getElementById('btn-close-settings').onclick = () => document.getElementById('settings-overlay').classList.add('hidden');
-    document.getElementById('toggle-theme').onchange = (e) => { App.settings.darkMode = e.target.checked; document.body.className = App.settings.darkMode ? 'dark-mode' : 'light-mode'; };
+    document.getElementById('toggle-theme').onchange = (e) => { 
+      App.settings.darkMode = e.target.checked; 
+      document.body.className = App.settings.darkMode ? 'dark-mode' : 'light-mode'; 
+      // Safely map status bar color dynamically
+      const meta = document.getElementById('meta-theme-color');
+      if (meta) meta.setAttribute("content", App.settings.darkMode ? "#000000" : "#ffffff");
+    };
     document.getElementById('toggle-sound').onchange = (e) => App.settings.sound = e.target.checked;
     document.getElementById('toggle-ghost').onchange = (e) => App.settings.ghostTyping = e.target.checked;
     document.getElementById('toggle-mode').onchange = (e) => {
@@ -76,6 +98,14 @@ const App = {
       document.getElementById('mode-desc').textContent = App.settings.useCloud ? "Cloud OTP" : "Manual/QR";
       App.renderState('IDLE', true);
     };
+
+    const qrSlider = document.getElementById('qr-slider');
+    if (qrSlider) {
+      qrSlider.oninput = (e) => {
+        App.settings.qrChunks = parseInt(e.target.value);
+        document.getElementById('qr-slider-val').textContent = App.settings.qrChunks;
+      };
+    }
 
     const btnInstall = document.getElementById('btn-install-pwa');
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -95,6 +125,9 @@ const App = {
         ctxMenu.classList.add('hidden');
       }
     });
+
+    // Boot audio system to prep for background usage
+    document.addEventListener('pointerdown', () => KeepAlive.init(), { once: true });
 
     App.renderState('IDLE', true);
   },
@@ -132,12 +165,14 @@ const App = {
     const headerActions = document.getElementById('header-actions');
     if (state === 'IDLE') {
       if(window.DrawController) DrawController.clear(false); 
+      KeepAlive.stop();
       headerActions.innerHTML = `<button id="btn-settings-head" class="icon-btn" title="Settings"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>`;
       document.getElementById('btn-settings-head').onclick = () => document.getElementById('settings-overlay').classList.remove('hidden');
       App.buildIdleView();
     }
     else if (state === 'CONNECTED') {
-      headerActions.innerHTML = `<button id="btn-end-head" class="btn-danger">End Chat</button>`;
+      KeepAlive.start(); // Initiates invisible silence loop for PWA backgrounding
+      headerActions.innerHTML = `<button id="btn-end-head" class="btn-danger" style="padding: 6px 12px; margin: 0; width: auto; font-size: 0.9rem;">End Chat</button>`;
       document.getElementById('btn-end-head').onclick = () => { if(connection) connection.destroy(); App.renderState('IDLE'); };
       App.buildChatView();
     }
@@ -168,7 +203,12 @@ const App = {
   renderScannerUI(expectedType, onSuccess) {
     const view = Utils.createElement('div', '', 'view idle-view');
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><h1 class="brand" style="margin:0;">Scan QR</h1><button id="btn-switch-cam" class="icon-btn" title="Switch Lens" style="padding:4px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-11.83l5.67-5.67"/></svg></button></div><p>Point camera at the flashing QR.</p>`;
+    
+    // Updated Pill UI for cleaner Camera Switch
+    card.innerHTML = `<div style="display:flex; flex-direction:column; align-items:center; margin-bottom:15px; gap: 10px;">
+                        <h1 class="brand" style="margin:0;">Scan QR</h1>
+                        <button id="btn-switch-cam" class="pill-btn hidden">🔄 Switch Lens</button>
+                      </div><p>Point camera at the flashing stream.</p>`;
     
     const instruction = Utils.createElement('div', 'Awaiting stream...', 'scan-instruction');
     const readerWrapper = Utils.createElement('div'); readerWrapper.id = 'reader-container'; readerWrapper.style.display = 'none';
@@ -192,20 +232,22 @@ const App = {
     };
 
     let cameras = []; let currentCamIndex = 0;
+    const btnSwitchCam = card.querySelector('#btn-switch-cam');
+    
     const startCam = async () => {
        await App.stopScannerSafely(); readerWrapper.style.display = 'block';
        html5QrCode = new Html5Qrcode("reader-container");
        try {
          const devices = await Html5Qrcode.getCameras();
          if(devices && devices.length > 0) {
-            cameras = devices; // Filter out front cameras if possible, but taking all for flexibility
+            cameras = devices; 
+            if(cameras.length > 1) btnSwitchCam.classList.remove('hidden');
             const config = { fps: 15, qrbox: (vw, vh) => ({ width: Math.min(vw, vh) * 0.8, height: Math.min(vw, vh) * 0.8 }) };
             await html5QrCode.start(cameras[currentCamIndex].id, config, handleScan);
          }
        } catch(e) { App.showAlert("Camera failed to load.", "Error"); }
     };
 
-    const btnSwitchCam = card.querySelector('#btn-switch-cam');
     btnSwitchCam.onclick = () => {
       if(cameras.length > 1) { currentCamIndex = (currentCamIndex + 1) % cameras.length; startCam(); }
     };
@@ -246,7 +288,7 @@ const App = {
 
     if(chunks.length > 1) {
       updateQR();
-      qrFlashInterval = setInterval(updateQR, 400); // 400ms Fountain loop
+      qrFlashInterval = setInterval(updateQR, 400);
     } else { setTimeout(() => new QRCode(qrDiv, { text: chunks[0], width: 220, height: 220, colorDark : "#000000", colorLight : "#ffffff", correctLevel: QRCode.CorrectLevel.L }), 100); }
     
     container.appendChild(qrWrap);
@@ -362,6 +404,7 @@ const App = {
 
     DrawController.init('chat-canvas', (cmdStr) => connection.sendPayload(cmdStr));
     const drawToolbar = document.getElementById('draw-toolbar');
+    const drawCollapseBtn = document.getElementById('btn-draw-collapse');
     
     const toggleDraw = (mode) => {
       diceMenu.classList.remove('active');
@@ -369,12 +412,11 @@ const App = {
       const btnChat = document.getElementById('btn-draw-chat');
       
       if (DrawController.isActive && DrawController.currentMode === mode) {
-        // Toggle OFF
         DrawController.toggle(false);
         drawToolbar.classList.add('hidden');
+        drawToolbar.classList.remove('collapsed');
         btnCanvas.classList.remove('active-green'); btnChat.classList.remove('active-green');
       } else {
-        // Toggle ON / Switch
         DrawController.toggle(true, mode);
         drawToolbar.classList.remove('hidden');
         if(mode === 'canvas') { btnCanvas.classList.add('active-green'); btnChat.classList.remove('active-green'); }
@@ -384,6 +426,8 @@ const App = {
     
     document.getElementById('btn-draw-canvas').onclick = () => toggleDraw('canvas');
     document.getElementById('btn-draw-chat').onclick = () => toggleDraw('chat');
+    
+    drawCollapseBtn.onclick = () => drawToolbar.classList.toggle('collapsed');
     
     document.querySelectorAll('.color-swatch').forEach(el => { el.onclick = () => { document.querySelector('.color-swatch.active').classList.remove('active'); el.classList.add('active'); DrawController.setColor(el.dataset.color); }; });
     document.getElementById('btn-draw-undo').onclick = () => DrawController.undo(true);
@@ -513,7 +557,7 @@ const App = {
       if (msg.active && msg.text) { cont.classList.remove('hidden'); txt.textContent = msg.text; if(!App.isScrolledUp) document.getElementById('chat-log').scrollTop = document.getElementById('chat-log').scrollHeight; } 
       else { cont.classList.add('hidden'); txt.textContent = ''; }
     }
-    else if ([Protocol.TYPES.DRAW_START, Protocol.TYPES.DRAW_PT, Protocol.TYPES.DRAW_UNDO].includes(msg.type)) DrawController.handleNetworkCommand(msg);
+    else if ([Protocol.TYPES.DRAW_START, Protocol.TYPES.DRAW_PT, Protocol.TYPES.DRAW_UNDO, Protocol.TYPES.DRAW_CLEAR].includes(msg.type)) DrawController.handleNetworkCommand(msg);
     else if (msg.type === Protocol.TYPES.DRAW_FINISH) DrawController.sendAsMessage(true);
     else if (msg.type === Protocol.TYPES.FILE_START) App.onIncomingFileStart(msg);
     else if (msg.type === Protocol.TYPES.FILE_END) App.onIncomingFileEnd(msg.id);
@@ -527,7 +571,6 @@ const App = {
     const wrap = Utils.createElement('div', '', `msg-wrap ${isSelf ? 'self' : 'peer'}`);
     wrap.id = msg.id;
     
-    // Check for single emoji
     const txtTrimmed = msg.text.trim();
     const isSingleEmoji = Array.from(txtTrimmed).length === 1 && /^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+$/u.test(txtTrimmed);
     
@@ -539,7 +582,6 @@ const App = {
     
     wrap.innerHTML = html;
     
-    // Context menu click listener
     const bubble = wrap.querySelector('.msg-bubble');
     if(!isSingleEmoji) {
        bubble.addEventListener('click', (e) => {
@@ -550,7 +592,7 @@ const App = {
          const rect = bubble.getBoundingClientRect();
          let y = rect.bottom + 5;
          let x = rect.left;
-         if (isSelf) x = rect.right - 120; // Align right for self
+         if (isSelf) x = rect.right - 120; 
          
          ctxMenu.style.top = `${Math.min(y, window.innerHeight - 80)}px`;
          ctxMenu.style.left = `${Math.max(10, Math.min(x, window.innerWidth - 130))}px`;
