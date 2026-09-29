@@ -666,9 +666,15 @@ const App = {
 
   async onBinaryChunkReceived(buffer) {
     const f = App.activeIncomingFile; if(!f) return;
-    f.received += buffer.byteLength;
-    if (f.stream) f.writeQueue = f.writeQueue.then(() => f.stream.write(buffer));
-    else f.chunks.push(buffer); 
+    
+    // FIX: Clone the buffer immediately to prevent the browser from 
+    // recycling this memory block and overwriting our chunks before they are saved.
+    const safeBuffer = buffer.slice(0); 
+    
+    f.received += safeBuffer.byteLength;
+    if (f.stream) f.writeQueue = f.writeQueue.then(() => f.stream.write(safeBuffer));
+    else f.chunks.push(safeBuffer); 
+    
     App.onFileTransferProgress(f.id, (f.received / f.size) * 100);
   },
 
