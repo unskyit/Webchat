@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'webchat-v4';
+const CACHE_NAME = 'webchat-v6';
 const ASSETS = [
   './',
   './index.html',
@@ -17,33 +17,23 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (e) => {
-  self.skipWaiting(); // Forces the waiting service worker to become the active service worker
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
-  );
+  self.skipWaiting();
+  e.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
 });
 
-// Added activate event to wipe out old cache versions (like v3) automatically
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME) {
-            return caches.delete(cache);
-          }
+          if (cache !== CACHE_NAME) return caches.delete(cache);
         })
       );
     })
   );
-  self.clients.claim(); // Take control of all clients immediately
+  self.clients.claim();
 });
 
 self.addEventListener('fetch', (e) => {
-  e.respondWith(
-    caches.match(e.request).then((response) => {
-      // Return cached file if available, otherwise fetch from network
-      return response || fetch(e.request);
-    })
-  );
+  e.respondWith(caches.match(e.request).then((response) => response || fetch(e.request)));
 });
