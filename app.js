@@ -298,7 +298,6 @@ const App = {
       const offerStr = await connection.generateOffer();
       await fetch(APP_SCRIPT_URL, { method: 'POST', body: JSON.stringify({ room: pin, type: 'offer', payload: offerStr }) });
       
-      // FIX: Secure pooling logic to prevent concurrent execution overwrites
       let polling = true;
       const poll = setInterval(async () => {
         if(!polling) return;
@@ -695,8 +694,6 @@ const App = {
     App.activeIncomingFile = null;
     let url = null;
     
-    // FIX: A bulletproof try/finally guarantees the ACK is always dispatched 
-    // to the sender, completely preventing the queue from getting permanently stuck.
     try {
       if (f.stream) {
         await f.writeQueue.catch(e => console.warn(e));
@@ -708,9 +705,15 @@ const App = {
       else if (!aborted) {
         const blob = new Blob(f.chunks, {type: f.mime || 'application/octet-stream'}); 
         url = URL.createObjectURL(blob);
-        if(!f.mime.startsWith('image/') && !f.mime.startsWith('video/') && !f.mime.startsWith('audio/')) { 
-           const a = document.createElement('a'); a.href = url; a.download = f.name; a.click(); 
-        }
+        
+        // FIX: Force Native OS Download Manager for ALL files unconditionally
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = f.name;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => document.body.removeChild(a), 100);
       }
     } catch (err) {
       console.error("Error finalizing file:", err);
@@ -763,9 +766,35 @@ const App = {
     const txt = document.getElementById(`text-${id}`); const bar = document.getElementById(`prog-${id}`);
     if(success && bar) bar.style.width = '100%';
     if(!success) { if(txt) txt.textContent = '❌ Cancelled'; return; }
-    if(txt) txt.innerHTML = (FileSystem.sessionFolder ? 'Saved' : 'Complete') + ' <span style="color:#10b981;">✔</span>';
+    
+    txt.innerHTML = (FileSystem.sessionFolder ? 'Saved' : 'Complete') + ' <span style="color:#10b981;">✔</span>';
     const cancelBtn = box.querySelector('.btn-cancel'); if(cancelBtn) cancelBtn.remove();
-    if (url && !box.querySelector('.media-preview') && !box.querySelector('.media-preview-audio')) { App._insertMediaPreview(box, url, mimeType); }
+    
+    if (url && !box.querySelector('.media-preview') && !box.querySelector('.media-preview-audio')) { 
+      App._insertMediaPreview(box, url, mimeType); 
+    }
+
+    // FIX: Inject a permanent manual physical save button for mobile fallbacks, 
+    // ensuring files are never "lost" even if the OS silently blocked the auto-download prompt.
+    if (url && !FileSystem.sessionFolder) {
+        const topRow = box.querySelector('.file-row');
+        if (topRow && !topRow.querySelector('.btn-manual-save')) {
+            const saveBtn = document.createElement('button');
+            saveBtn.className = 'btn-manual-save';
+            saveBtn.style.cssText = 'background: transparent; color: var(--primary); border: 1px solid var(--primary); padding: 2px 8px; font-size: 0.75rem; border-radius: 6px; margin: 0 0 0 8px; cursor: pointer; height: auto; width: auto; font-weight: bold; flex-shrink: 0;';
+            saveBtn.innerText = '⬇ Save';
+            saveBtn.onclick = (e) => {
+                e.stopPropagation();
+                const a = document.createElement('a'); 
+                a.href = url; 
+                a.download = box.querySelector('.file-name').title || 'download';
+                document.body.appendChild(a); 
+                a.click(); 
+                document.body.removeChild(a);
+            };
+            topRow.appendChild(saveBtn);
+        }
+    }
   },
 
   onScreenCastReceived(stream) {
