@@ -381,6 +381,19 @@ const App = {
 
     document.getElementById('btn-set-dir').onclick = async () => { diceMenu.classList.remove('active'); const ok = await FileSystem.requestDirectory(); if(ok) document.getElementById('btn-set-dir').style.color = '#10b981'; };
     document.getElementById('btn-screen-cast').onclick = () => { diceMenu.classList.remove('active'); connection.toggleScreenCasting(); };
+    const btnFullscreen = document.getElementById('btn-fullscreen-cast');
+    if (btnFullscreen) {
+      btnFullscreen.onclick = () => {
+        const cont = document.getElementById('media-container');
+        if (!document.fullscreenElement) {
+          if (cont.requestFullscreen) cont.requestFullscreen();
+          else if (cont.webkitRequestFullscreen) cont.webkitRequestFullscreen();
+        } else {
+          if (document.exitFullscreen) document.exitFullscreen();
+          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        }
+      };
+    }
     document.getElementById('btn-chat-settings').onclick = () => { diceMenu.classList.remove('active'); document.getElementById('settings-overlay').classList.remove('hidden'); };
 
     const fileInput = document.getElementById('file-input');
