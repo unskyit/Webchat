@@ -159,26 +159,38 @@ class P2PConnection {
     
     this.app.onFileTransferStart(fileId, item.file.name, item.file.size, true, item.bId, item.file);
 
-    // Reduced chunk size to 16KB to prevent SCTP fragmentation & corruption[cite: 1]
     const chunkSize = 16384; 
     let offset = 0;
     this.activeTransfer = { id: fileId, aborted: false };
 
     while (offset < item.file.size && !this.activeTransfer.aborted) {
-      if (this.dc.bufferedAmount > this.dc.bufferedAmountLowThreshold) {
-        // Polling fallback to ensure robust draining during heavy loads[cite: 1]
-        await new Promise(r => { 
-            const check = () => {
-                if (this.dc.bufferedAmount <= this.dc.bufferedAmountLowThreshold) r();
-                else setTimeout(check, 10);
-            };
-            check();
+      if (this.dc.readyState !== 'open') break;
+
+      // FIX: Replace inefficient timeout polling with exact event listeners to prevent loop starvation
+      if (this.dc.bufferedAmount >= this.dc.bufferedAmountLowThreshold) {
+        await new Promise(resolve => {
+          const drainHandler = () => {
+            this.dc.removeEventListener('bufferedamountlow', drainHandler);
+            this.dc.removeEventListener('close', closeHandler);
+            resolve();
+          };
+          const closeHandler = () => {
+            this.dc.removeEventListener('bufferedamountlow', drainHandler);
+            this.dc.removeEventListener('close', closeHandler);
+            resolve();
+          };
+          
+          this.dc.addEventListener('bufferedamountlow', drainHandler);
+          this.dc.addEventListener('close', closeHandler);
+          
+          // Failsafe if it drained milliseconds before listener attached
+          if (this.dc.bufferedAmount < this.dc.bufferedAmountLowThreshold) drainHandler();
         });
       }
-      if (this.activeTransfer.aborted) break;
+      
+      if (this.activeTransfer.aborted || this.dc.readyState !== 'open') break;
       
       try {
-        // Modern approach to fetch chunk natively without FileReader async quirks[cite: 1]
         const chunk = await item.file.slice(offset, offset + chunkSize).arrayBuffer();
         this.dc.send(chunk); 
         this.metrics.txBytes += chunk.byteLength;
@@ -186,11 +198,14 @@ class P2PConnection {
         this.app.onFileTransferProgress(fileId, (offset / item.file.size) * 100);
       } catch (err) {
         console.error("Transmission error: ", err);
-        break;
+        break; // Break current file loop but allow queue to process the next
       }
     }
 
-    this.sendPayload(JSON.stringify({ v: Protocol.VERSION, type: this.activeTransfer.aborted ? Protocol.TYPES.FILE_CANCEL : Protocol.TYPES.FILE_END, id: fileId }));
+    if (this.dc.readyState === 'open') {
+       this.sendPayload(JSON.stringify({ v: Protocol.VERSION, type: this.activeTransfer.aborted ? Protocol.TYPES.FILE_CANCEL : Protocol.TYPES.FILE_END, id: fileId }));
+    }
+    
     this.app.onFileTransferComplete(fileId, null, !this.activeTransfer.aborted);
     this.activeTransfer = null; 
     this.processFileQueue();
