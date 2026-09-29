@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'webchat-v6';
+const CACHE_NAME = 'webchat-v7';
 const ASSETS = [
   './',
   './index.html',
