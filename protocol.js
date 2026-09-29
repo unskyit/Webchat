@@ -10,7 +10,7 @@ const Protocol = {
     DRAW: 'draw_stroke', DRAW_UNDO: 'draw_undo', DRAW_CLEAR: 'draw_clear', 
     DRAW_START: 'd_st', DRAW_PT: 'd_pt', DRAW_FINISH: 'd_end',
     FILE_START: 'file_start', FILE_CHUNK: 'file_chunk', 
-    FILE_END: 'file_end', FILE_CANCEL: 'file_cancel', RECEIPT: 'receipt', 
+    FILE_END: 'file_end', FILE_CANCEL: 'file_cancel', FILE_ACK: 'file_ack', RECEIPT: 'receipt', 
     SCREEN_OFFER: 'screen_offer', SCREEN_ANSWER: 'screen_answer' 
   },
 
