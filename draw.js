@@ -2,7 +2,7 @@
 
 const DrawController = {
   canvas: null, ctx: null, 
-  isActive: false, isDrawing: false,
+  isActive: false, isDrawing: false, currentMode: null,
   color: '#ff0000', width: 3,
   myStrokes: [], peerStrokes: [], 
   activeStrokeId: null, activeStroke: null,
@@ -37,9 +37,19 @@ const DrawController = {
     this.render(); 
   },
 
-  toggle(state) {
+  toggle(state, mode = 'chat') {
     this.isActive = state;
+    this.currentMode = state ? mode : null;
     this.canvas.classList.toggle('active', state);
+    
+    const chatLog = document.getElementById('chat-log');
+    if (state && mode === 'canvas') {
+      this.canvas.classList.add('solid');
+      chatLog.classList.add('fade-out');
+    } else {
+      this.canvas.classList.remove('solid');
+      chatLog.classList.remove('fade-out');
+    }
   },
 
   setColor(hex) { this.color = hex; },
@@ -112,7 +122,40 @@ const DrawController = {
     }
   },
 
-  // Flattens the canvas into a chat image bubble and gracefully removes it from the top layer.
+  download() {
+    if (this.myStrokes.length === 0 && this.peerStrokes.length === 0) return;
+    const link = document.createElement('a');
+    link.download = `Drawing-${Date.now()}.png`;
+    
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = this.canvas.width; tempCanvas.height = this.canvas.height;
+    const tCtx = tempCanvas.getContext('2d');
+    tCtx.fillStyle = '#ffffff'; tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+    tCtx.drawImage(this.canvas, 0, 0);
+    
+    link.href = tempCanvas.toDataURL('image/png');
+    link.click();
+  },
+  
+  async share() {
+    if (this.myStrokes.length === 0 && this.peerStrokes.length === 0) return;
+    
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = this.canvas.width; tempCanvas.height = this.canvas.height;
+    const tCtx = tempCanvas.getContext('2d');
+    tCtx.fillStyle = '#ffffff'; tCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+    tCtx.drawImage(this.canvas, 0, 0);
+    
+    tempCanvas.toBlob(async (blob) => {
+      const file = new File([blob], `Drawing-${Date.now()}.png`, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: 'Shared Drawing' }); } catch (err) { console.error("Share failed:", err); }
+      } else {
+        alert("Sharing not supported on this device/browser.");
+      }
+    });
+  },
+
   sendAsMessage(isPeer = false) {
     if (this.myStrokes.length === 0 && this.peerStrokes.length === 0) {
       this.clear(false);
@@ -140,6 +183,8 @@ const DrawController = {
     this.toggle(false);
     const tb = document.getElementById('draw-toolbar');
     if(tb) tb.classList.add('hidden');
+    document.getElementById('btn-draw-canvas').classList.remove('active-green');
+    document.getElementById('btn-draw-chat').classList.remove('active-green');
   },
 
   render() {
