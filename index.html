@@ -4,10 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Webchat</title>
+  <!-- Dynamic Status Bar Meta Tag -->
+  <meta name="theme-color" id="meta-theme-color" content="#ffffff">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔒</text></svg>">
   <link rel="stylesheet" href="styles.css">
   <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#f0f4f8">
   <link rel="apple-touch-icon" href="icon.svg">
 </head>
 <body class="light-mode">
@@ -60,6 +61,11 @@
         <div class="setting-text"><span>Ghost Typing</span><small>Live text preview</small></div>
         <label class="switch"><input type="checkbox" id="toggle-ghost"><span class="slider"></span></label>
       </div>
+      <div class="setting-row">
+        <div class="setting-text"><span>QR Splitter</span></div>
+        <!-- Extended max to 20 for smoother scanning -->
+        <div class="slider-group"><input type="range" id="qr-slider" min="1" max="20" value="15"><span id="qr-slider-val">15</span></div>
+      </div>
       
       <button id="btn-close-settings" class="secondary mt-10">Close</button>
     </div>
@@ -70,21 +76,27 @@
   <template id="tpl-chat">
     <div class="view chat-view">
       
+      <!-- Collapsible Drawing Toolbar -->
       <div id="draw-toolbar" class="hidden">
-        <div class="color-picker">
-          <div class="color-swatch active" data-color="#ff0000" style="background:#ff0000;"></div>
-          <div class="color-swatch" data-color="#10b981" style="background:#10b981;"></div>
-          <div class="color-swatch" data-color="#3b82f6" style="background:#3b82f6;"></div>
-          <div class="color-swatch" data-color="#000000" style="background:#000000;"></div>
-          <div class="color-swatch" data-color="#f59e0b" style="background:#f59e0b;"></div>
+        <div id="draw-toolbar-content">
+          <div class="color-picker">
+            <div class="color-swatch active" data-color="#ff0000" style="background:#ff0000;"></div>
+            <div class="color-swatch" data-color="#10b981" style="background:#10b981;"></div>
+            <div class="color-swatch" data-color="#3b82f6" style="background:#3b82f6;"></div>
+            <div class="color-swatch" data-color="#000000" style="background:#000000;"></div>
+            <div class="color-swatch" data-color="#f59e0b" style="background:#f59e0b;"></div>
+          </div>
+          <div class="draw-actions">
+            <button id="btn-draw-undo" class="draw-icon-btn" title="Undo">↶</button>
+            <button id="btn-draw-download" class="draw-icon-btn" title="Download">⬇</button>
+            <button id="btn-draw-share" class="draw-icon-btn" title="Share">🔗</button>
+            <button id="btn-draw-send" class="draw-send-btn">Send</button>
+            <button id="btn-draw-close" class="draw-cancel-btn">✕</button>
+          </div>
         </div>
-        <div class="draw-actions">
-          <button id="btn-draw-undo" class="secondary">Undo</button>
-          <button id="btn-draw-download" class="secondary">Download</button>
-          <button id="btn-draw-share" class="secondary">Share</button>
-          <button id="btn-draw-send">Done & Send</button>
-          <button id="btn-draw-close" class="btn-danger">Cancel</button>
-        </div>
+        <button id="btn-draw-collapse" title="Hide/Show Toolbar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+        </button>
       </div>
 
       <div class="chat-wrapper">
@@ -106,7 +118,6 @@
       </div>
 
       <div id="chat-input-container">
-        <!-- Reply Preview Area -->
         <div id="reply-preview" class="hidden">
           <div><small style="color: var(--primary); font-weight: bold;">Replying to</small><p id="reply-preview-text">Message preview...</p></div>
           <button id="close-reply">×</button>
@@ -138,7 +149,6 @@
     </div>
   </template>
 
-  <!-- Global Context Menu -->
   <div id="context-menu" class="hidden">
     <button class="context-item" id="ctx-reply">Reply</button>
     <button class="context-item" id="ctx-copy">Copy</button>
