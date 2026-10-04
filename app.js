@@ -75,23 +75,66 @@ const App = {
   activeIncomingFile: null, activeBatches: {},
   isScrolledUp: false, unreadCount: 0,
 
+  saveSettings() {
+    localStorage.setItem('wchat_settings', JSON.stringify(this.settings));
+  },
+
+  loadSettings() {
+    const saved = JSON.parse(localStorage.getItem('wchat_settings') || '{}');
+    this.settings = { ...this.settings, ...saved };
+    
+    const themeToggle = document.getElementById('toggle-theme');
+    if (themeToggle) themeToggle.checked = this.settings.darkMode;
+    
+    const soundToggle = document.getElementById('toggle-sound');
+    if (soundToggle) soundToggle.checked = this.settings.sound;
+    
+    const ghostToggle = document.getElementById('toggle-ghost');
+    if (ghostToggle) ghostToggle.checked = this.settings.ghostTyping;
+    
+    const modeToggle = document.getElementById('toggle-mode');
+    if (modeToggle) modeToggle.checked = this.settings.useCloud;
+    
+    document.body.className = this.settings.darkMode ? 'dark-mode' : 'light-mode'; 
+    const meta = document.getElementById('meta-theme-color');
+    if (meta) meta.setAttribute("content", this.settings.darkMode ? "#000000" : "#f0f4f8");
+    
+    const modeDesc = document.getElementById('mode-desc');
+    if (modeDesc) modeDesc.textContent = this.settings.useCloud ? "Cloud OTP" : "Manual/QR";
+  },
+
   init() {
+    this.loadSettings();
+
+    window.addEventListener('beforeunload', (e) => {
+      if (connection) { e.preventDefault(); e.returnValue = ''; }
+    });
+
     window.addEventListener('popstate', (e) => {
+      if (connection) {
+         history.pushState({ view: 'CONNECTED' }, '', '#CONNECTED');
+         App.showAlert("Please end the chat using the 'End Chat' button to safely disconnect.", "Action Blocked");
+         return;
+      }
       if (e.state && e.state.view) App.renderState(e.state.view, false);
       else App.renderState('IDLE', false);
     });
 
-    document.getElementById('btn-close-settings').onclick = () => document.getElementById('settings-overlay').classList.add('hidden');
+    document.getElementById('btn-close-settings').onclick = () => {
+      document.getElementById('settings-overlay').classList.add('hidden');
+    };
+    
     document.getElementById('toggle-theme').onchange = (e) => { 
-      App.settings.darkMode = e.target.checked; 
+      App.settings.darkMode = e.target.checked; App.saveSettings();
       document.body.className = App.settings.darkMode ? 'dark-mode' : 'light-mode'; 
       const meta = document.getElementById('meta-theme-color');
-      if (meta) meta.setAttribute("content", App.settings.darkMode ? "#000000" : "#ffffff");
+      if (meta) meta.setAttribute("content", App.settings.darkMode ? "#000000" : "#f0f4f8");
     };
-    document.getElementById('toggle-sound').onchange = (e) => App.settings.sound = e.target.checked;
-    document.getElementById('toggle-ghost').onchange = (e) => App.settings.ghostTyping = e.target.checked;
+    
+    document.getElementById('toggle-sound').onchange = (e) => { App.settings.sound = e.target.checked; App.saveSettings(); };
+    document.getElementById('toggle-ghost').onchange = (e) => { App.settings.ghostTyping = e.target.checked; App.saveSettings(); };
     document.getElementById('toggle-mode').onchange = (e) => {
-      App.settings.useCloud = e.target.checked;
+      App.settings.useCloud = e.target.checked; App.saveSettings();
       document.getElementById('mode-desc').textContent = App.settings.useCloud ? "Cloud OTP" : "Manual/QR";
       App.renderState('IDLE', true);
     };
@@ -135,7 +178,26 @@ const App = {
         titleEl.textContent = title; textEl.textContent = text;
         overlay.classList.remove('hidden');
         document.getElementById('custom-alert-btn').onclick = () => overlay.classList.add('hidden');
-    } else { alert(`${title}: ${text}`); }
+    }
+  },
+
+  showConfirm(title, text, onConfirm, onCancel) {
+    const titleEl = document.getElementById('custom-confirm-title');
+    const textEl = document.getElementById('custom-confirm-text');
+    const overlay = document.getElementById('custom-confirm-overlay');
+    if (overlay && titleEl && textEl) {
+        titleEl.textContent = title; textEl.textContent = text;
+        overlay.classList.remove('hidden');
+        
+        document.getElementById('custom-confirm-cancel').onclick = () => {
+           overlay.classList.add('hidden');
+           if(onCancel) onCancel();
+        };
+        document.getElementById('custom-confirm-ok').onclick = () => {
+           overlay.classList.add('hidden');
+           if(onConfirm) onConfirm();
+        };
+    }
   },
 
   async stopScannerSafely() {
@@ -154,8 +216,9 @@ const App = {
     App.stopScannerSafely();
     clearInterval(qrFlashInterval);
     
-    const modeSetting = document.getElementById('setting-row-mode');
-    if (modeSetting) modeSetting.style.display = (state === 'CONNECTED') ? 'none' : 'flex';
+    document.getElementById('setting-row-mode').style.display = (state === 'CONNECTED') ? 'none' : 'flex';
+    document.getElementById('setting-row-battery').style.display = 'none';
+    document.getElementById('peer-warn-banner').classList.add('hidden');
 
     const headerActions = document.getElementById('header-actions');
     if (state === 'IDLE') {
@@ -168,9 +231,25 @@ const App = {
     else if (state === 'CONNECTED') {
       KeepAlive.start(); 
       headerActions.innerHTML = `<button id="btn-end-head" class="btn-danger" style="padding: 6px 12px; margin: 0; width: auto; font-size: 0.9rem;">End Chat</button>`;
-      document.getElementById('btn-end-head').onclick = () => { if(connection) connection.destroy(); App.renderState('IDLE'); };
+      
+      document.getElementById('btn-end-head').onclick = () => { 
+        if(!connection) return;
+        connection.sendPayload(JSON.stringify({v: Protocol.VERSION, type: Protocol.TYPES.WARN_DISCONNECT}));
+        App.showConfirm("Disconnect?", "Are you sure you want to end this chat?", () => {
+            connection.destroy();
+            App.renderState('IDLE');
+        }, () => {
+            connection.sendPayload(JSON.stringify({v: Protocol.VERSION, type: Protocol.TYPES.CANCEL_DISCONNECT}));
+        });
+      };
+      
       App.buildChatView();
     }
+  },
+
+  updateStatusText(txt) {
+    const el = document.getElementById('loading-status');
+    if(el) el.textContent = txt;
   },
 
   buildIdleView() {
@@ -290,7 +369,7 @@ const App = {
 
   async hostCloudRoom(pin) {
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = `<h1>Room Created</h1><h2 class="otp-input">${pin}</h2>${animHTML}<p>Waiting for friend...</p>`;
+    card.innerHTML = `<h1>Room Created</h1><h2 class="otp-input">${pin}</h2>${animHTML}<p id="loading-status">Waiting for friend...</p>`;
     App.container.innerHTML = '<div class="view idle-view"></div>'; App.container.firstChild.appendChild(card);
     
     connection = new P2PConnection(App);
@@ -307,17 +386,18 @@ const App = {
           if (data.payload && polling) { 
             polling = false;
             clearInterval(poll); 
+            App.updateStatusText("Securing connection...");
             const answerSignal = Protocol.validateSignal(data.payload, 'answer'); 
             if (answerSignal) connection.acceptAnswer(answerSignal); 
           }
         } catch(e) {}
-      }, 3000);
+      }, 1500); 
     } catch(e) { App.showAlert("Network failed. Ensure you are connected to the internet.", "Network Error"); App.renderState('IDLE'); }
   },
 
   async joinCloudRoom(pin) {
     const card = Utils.createElement('div', '', 'card');
-    card.innerHTML = `<h1>Connecting...</h1><p>PIN: ${pin}</p>${animHTML}`;
+    card.innerHTML = `<h1>Connecting...</h1><p>PIN: ${pin}</p>${animHTML}<p id="loading-status">Finding room...</p>`;
     App.container.innerHTML = '<div class="view idle-view"></div>'; App.container.firstChild.appendChild(card);
     
     connection = new P2PConnection(App);
@@ -329,6 +409,7 @@ const App = {
       const offerSignal = Protocol.validateSignal(data.payload, 'offer');
       if (!offerSignal) throw new Error("Room offer has expired or is invalid.");
 
+      App.updateStatusText("Securing connection...");
       const answerStr = await connection.acceptOfferAndGenerateAnswer(offerSignal);
       await fetch(APP_SCRIPT_URL, { method: 'POST', body: JSON.stringify({ room: pin, type: 'answer', payload: answerStr }) });
     } catch(e) { App.showAlert(e.message, "Join Failed"); App.renderState('IDLE'); }
@@ -349,7 +430,7 @@ const App = {
         const btnScan = Utils.createElement('button', 'Provide Answer Code');
         btnScan.onclick = () => App.renderScannerUI('answer', (decoded) => {
            const ans = Protocol.validateSignal(Utils.decodeBase64Url(decoded), 'answer');
-           if(ans) connection.acceptAnswer(ans); else { App.showAlert("Invalid code scanned."); App.renderState('IDLE'); } 
+           if(ans) connection.acceptAnswer(ans); else { App.showAlert("Invalid code scanned.", "Error"); App.renderState('IDLE'); } 
         });
         card.appendChild(btnScan);
       }, 200);
@@ -394,7 +475,16 @@ const App = {
         }
       };
     }
-    document.getElementById('btn-chat-settings').onclick = () => { diceMenu.classList.remove('active'); document.getElementById('settings-overlay').classList.remove('hidden'); };
+    
+    document.getElementById('btn-chat-settings').onclick = () => { 
+      diceMenu.classList.remove('active'); 
+      document.getElementById('settings-overlay').classList.remove('hidden'); 
+      if(connection) {
+         document.getElementById('setting-row-battery').style.display = 'flex';
+         document.getElementById('battery-text').textContent = "Fetching...";
+         connection.sendPayload(JSON.stringify({v: Protocol.VERSION, type: Protocol.TYPES.BATTERY_REQ}));
+      }
+    };
 
     const fileInput = document.getElementById('file-input');
     document.getElementById('btn-file').onclick = () => { diceMenu.classList.remove('active'); fileInput.click(); };
@@ -442,7 +532,6 @@ const App = {
     
     drawCollapseBtn.onclick = () => drawToolbar.classList.toggle('collapsed');
     
-    document.querySelectorAll('.color-swatch').forEach(el => { el.onclick = () => { document.querySelector('.color-swatch.active').classList.remove('active'); el.classList.add('active'); DrawController.setColor(el.dataset.color); }; });
     document.getElementById('btn-draw-undo').onclick = () => DrawController.undo(true);
     document.getElementById('btn-draw-download').onclick = () => DrawController.download();
     document.getElementById('btn-draw-share').onclick = () => DrawController.share();
@@ -575,6 +664,30 @@ const App = {
     else if (msg.type === Protocol.TYPES.FILE_ACK) { if(connection) connection.onFileAck(msg.id); }
     else if (msg.type === Protocol.TYPES.RECEIPT) App.updateReceipt(msg.id, msg.status);
     else if (msg.type.startsWith('screen_')) connection.handleScreenSignal(msg);
+    else if (msg.type === Protocol.TYPES.BATTERY_REQ) {
+      if (navigator.getBattery) {
+        navigator.getBattery().then(b => {
+          connection.sendPayload(JSON.stringify({v: Protocol.VERSION, type: Protocol.TYPES.BATTERY_RES, level: Math.round(b.level * 100)}));
+        }).catch(() => {
+          connection.sendPayload(JSON.stringify({v: Protocol.VERSION, type: Protocol.TYPES.BATTERY_RES, level: 'ERR'}));
+        });
+      } else {
+        connection.sendPayload(JSON.stringify({v: Protocol.VERSION, type: Protocol.TYPES.BATTERY_RES, level: 'UNSUPPORTED'}));
+      }
+    }
+    else if (msg.type === Protocol.TYPES.BATTERY_RES) {
+       if (msg.level === 'UNSUPPORTED' || msg.level === 'ERR') {
+           document.getElementById('battery-text').textContent = "Not supported by device";
+       } else {
+           document.getElementById('battery-text').textContent = `${msg.level}% (Fetched at ${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})})`;
+       }
+    }
+    else if (msg.type === Protocol.TYPES.WARN_DISCONNECT) {
+       document.getElementById('peer-warn-banner').classList.remove('hidden');
+    }
+    else if (msg.type === Protocol.TYPES.CANCEL_DISCONNECT) {
+       document.getElementById('peer-warn-banner').classList.add('hidden');
+    }
   },
 
   renderMessage(msg, isSelf) {
@@ -595,6 +708,34 @@ const App = {
     
     const bubble = wrap.querySelector('.msg-bubble');
     if(!isSingleEmoji) {
+       
+       let startX = 0, currentX = 0, isSwiping = false;
+       bubble.addEventListener('touchstart', e => { 
+           startX = e.touches[0].clientX; currentX = startX; isSwiping = true;
+           bubble.classList.add('swiping'); 
+       }, {passive: true});
+       
+       bubble.addEventListener('touchmove', e => {
+           if(!isSwiping) return;
+           currentX = e.touches[0].clientX;
+           let diff = currentX - startX;
+           if (diff > 0 && diff < 80) bubble.style.transform = `translateX(${diff}px)`;
+       }, {passive: true});
+       
+       bubble.addEventListener('touchend', e => {
+           if(!isSwiping) return;
+           isSwiping = false;
+           let diff = currentX - startX;
+           bubble.classList.remove('swiping');
+           bubble.style.transform = ''; 
+           if (diff > 50) {
+              activeReplyMsg = { id: msg.id, text: msg.text };
+              document.getElementById('reply-preview-text').textContent = activeReplyMsg.text;
+              document.getElementById('reply-preview').classList.remove('hidden');
+              document.getElementById('chat-input').focus();
+           }
+       });
+
        bubble.addEventListener('click', (e) => {
          e.stopPropagation();
          const ctxMenu = document.getElementById('context-menu');
@@ -706,7 +847,6 @@ const App = {
         const blob = new Blob(f.chunks, {type: f.mime || 'application/octet-stream'}); 
         url = URL.createObjectURL(blob);
         
-        // FIX: Force Native OS Download Manager for ALL files unconditionally
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = url;
@@ -774,8 +914,6 @@ const App = {
       App._insertMediaPreview(box, url, mimeType); 
     }
 
-    // FIX: Inject a permanent manual physical save button for mobile fallbacks, 
-    // ensuring files are never "lost" even if the OS silently blocked the auto-download prompt.
     if (url && !FileSystem.sessionFolder) {
         const topRow = box.querySelector('.file-row');
         if (topRow && !topRow.querySelector('.btn-manual-save')) {
