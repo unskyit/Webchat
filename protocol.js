@@ -11,7 +11,9 @@ const Protocol = {
     DRAW_START: 'd_st', DRAW_PT: 'd_pt', DRAW_FINISH: 'd_end',
     FILE_START: 'file_start', FILE_CHUNK: 'file_chunk', 
     FILE_END: 'file_end', FILE_CANCEL: 'file_cancel', FILE_ACK: 'file_ack', RECEIPT: 'receipt', 
-    SCREEN_OFFER: 'screen_offer', SCREEN_ANSWER: 'screen_answer' 
+    SCREEN_OFFER: 'screen_offer', SCREEN_ANSWER: 'screen_answer',
+    BATTERY_REQ: 'bat_req', BATTERY_RES: 'bat_res',
+    WARN_DISCONNECT: 'warn_dc', CANCEL_DISCONNECT: 'cancel_dc'
   },
 
   createSignal: (type, sessionId, sdp) => JSON.stringify({ v: Protocol.VERSION, t: type, i: sessionId, ts: Date.now(), s: sdp }),
