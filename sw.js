@@ -1,5 +1,5 @@
 // sw.js - Resilient Desktop & Mobile Offline PWA Cache
-const CACHE_NAME = 'webchat-v11';
+const CACHE_NAME = 'webchat-v12';
 const ASSETS = [
   './',
   './index.html',
