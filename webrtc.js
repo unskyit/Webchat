@@ -17,7 +17,11 @@ class P2PConnection {
 
   _initPC() {
     this.pc = new RTCPeerConnection(this.config);
+    
     this.pc.oniceconnectionstatechange = () => { 
+      if (this.pc.iceConnectionState === 'checking') {
+        this.app.updateStatusText("Almost there...");
+      }
       if (['disconnected', 'failed', 'closed'].includes(this.pc.iceConnectionState)) { 
         this.app.onStateChange("ERR_PEER_DISCONNECTED", "Session disconnected."); 
         this.destroy(); 
@@ -84,10 +88,7 @@ class P2PConnection {
   
   async acceptAnswer(answerSignal) { 
     if (answerSignal.i !== this.sessionId) throw new Error("ERR_SESSION_MISMATCH"); 
-    
-    // FIX: Block consecutive resolution calls to immediately halt "InvalidStateError"
     if (this.pc.signalingState !== 'have-local-offer') return; 
-    
     await this.pc.setRemoteDescription(new RTCSessionDescription(answerSignal.s)); 
   }
   
@@ -100,7 +101,7 @@ class P2PConnection {
 
   async toggleScreenCasting() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-      alert("Screen sharing is not supported on this device/browser.");
+      this.app.showAlert("Screen sharing is not supported on this device/browser.", "Unsupported");
       return;
     }
     
@@ -163,7 +164,6 @@ class P2PConnection {
     
     this.app.onFileTransferStart(fileId, item.file.name, item.file.size, true, item.bId, item.file);
 
-    // FIX: Explicitly revert to 16KB to prevent silent truncations on mobile implementations
     const chunkSize = 16384; 
     let offset = 0;
     this.activeTransfer = { id: fileId, aborted: false };
@@ -171,7 +171,6 @@ class P2PConnection {
     while (offset < item.file.size && !this.activeTransfer.aborted) {
       if (this.dc.readyState !== 'open') break;
 
-      // FIX: Solid, non-locking polling function
       if (this.dc.bufferedAmount >= this.dc.bufferedAmountLowThreshold) {
         await new Promise(resolve => {
           const check = () => {
