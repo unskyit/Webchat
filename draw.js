@@ -27,6 +27,14 @@ const DrawController = {
     this.canvas.addEventListener('touchstart', (e) => { if(this.isActive) e.preventDefault(); start(e.touches[0]); }, { passive: false });
     this.canvas.addEventListener('touchmove', (e) => { if(this.isActive) e.preventDefault(); move(e.touches[0]); }, { passive: false });
     this.canvas.addEventListener('touchend', end);
+
+    // Color Picker UI
+    const colorPicker = document.getElementById('draw-color-picker');
+    if (colorPicker) {
+      colorPicker.addEventListener('input', (e) => {
+        this.setColor(e.target.value);
+      });
+    }
   },
 
   resize() {
@@ -120,7 +128,6 @@ const DrawController = {
       this.peerStrokes.pop();
       this.render();
     } else if (msg.type === Protocol.TYPES.DRAW_CLEAR) {
-      // Safely wipe the peer strokes that were being drawn live, without touching local drawings
       this.peerStrokes = [];
       this.render();
     }
@@ -154,7 +161,7 @@ const DrawController = {
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         try { await navigator.share({ files: [file], title: 'Shared Drawing' }); } catch (err) { console.error("Share failed:", err); }
       } else {
-        alert("Sharing not supported on this device/browser.");
+        App.showAlert("Sharing not supported on this device/browser.");
       }
     });
   },
@@ -180,12 +187,12 @@ const DrawController = {
   },
 
   clear(isSelf) {
-    // Only wipe our unsent strokes.
+    // BUG FIX: Ensure peer ink is wiped along with local ink
     this.myStrokes = [];
+    this.peerStrokes = []; 
     this.render();
     this.toggle(false);
     
-    // Wipe them from the peer's screen instantly
     if (isSelf && this.onSendCommand) {
         this.onSendCommand(Protocol.createDrawCommand(Protocol.TYPES.DRAW_CLEAR));
     }
