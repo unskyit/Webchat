@@ -23,6 +23,10 @@
     </div>
   </header>
 
+  <!-- Notification Banner -->
+  <div id="peer-warn-banner" class="hidden">User is disconnecting...</div>
+
+  <!-- Custom Alert Box -->
   <div id="custom-alert-overlay" class="hidden">
     <div class="custom-alert-box">
       <h3 id="custom-alert-title">Notice</h3>
@@ -31,6 +35,19 @@
     </div>
   </div>
 
+  <!-- Custom Confirm Box -->
+  <div id="custom-confirm-overlay" class="hidden">
+    <div class="custom-alert-box">
+      <h3 id="custom-confirm-title">Confirm</h3>
+      <p id="custom-confirm-text"></p>
+      <div style="display:flex; gap:10px;">
+        <button id="custom-confirm-cancel" class="secondary">Cancel</button>
+        <button id="custom-confirm-ok" class="btn-danger" style="margin: 0;">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Overlay -->
   <div id="settings-overlay" class="hidden">
     <div class="settings-card">
       <h3 style="margin-bottom: 20px; color: var(--text-main);">Settings</h3>
@@ -45,17 +62,23 @@
         <div id="data-counter">0 MB ⬆ | 0 MB ⬇</div>
       </div>
 
+      <!-- Live Battery Row -->
+      <div class="setting-row" id="setting-row-battery" style="display: none;">
+        <div class="setting-text"><span>Peer Battery</span><small id="battery-text">Fetching...</small></div>
+        <span style="font-size: 1.2rem;">🔋</span>
+      </div>
+
       <div class="setting-row">
         <div class="setting-text"><span>Dark Mode</span></div>
         <label class="switch"><input type="checkbox" id="toggle-theme"><span class="slider"></span></label>
       </div>
       <div class="setting-row">
         <div class="setting-text"><span>Sound Effects</span></div>
-        <label class="switch"><input type="checkbox" id="toggle-sound" checked><span class="slider"></span></label>
+        <label class="switch"><input type="checkbox" id="toggle-sound"><span class="slider"></span></label>
       </div>
       <div class="setting-row" id="setting-row-mode">
         <div class="setting-text"><span>Connection Mode</span><small id="mode-desc">Cloud OTP</small></div>
-        <label class="switch"><input type="checkbox" id="toggle-mode" checked><span class="slider"></span></label>
+        <label class="switch"><input type="checkbox" id="toggle-mode"><span class="slider"></span></label>
       </div>
       <div class="setting-row">
         <div class="setting-text"><span>Ghost Typing</span><small>Live text preview</small></div>
@@ -63,7 +86,6 @@
       </div>
       <div class="setting-row">
         <div class="setting-text"><span>QR Splitter</span></div>
-        <!-- Extended max to 20 for smoother scanning -->
         <div class="slider-group"><input type="range" id="qr-slider" min="1" max="20" value="15"><span id="qr-slider-val">15</span></div>
       </div>
       
@@ -80,11 +102,7 @@
       <div id="draw-toolbar" class="hidden">
         <div id="draw-toolbar-content">
           <div class="color-picker">
-            <div class="color-swatch active" data-color="#ff0000" style="background:#ff0000;"></div>
-            <div class="color-swatch" data-color="#10b981" style="background:#10b981;"></div>
-            <div class="color-swatch" data-color="#3b82f6" style="background:#3b82f6;"></div>
-            <div class="color-swatch" data-color="#000000" style="background:#000000;"></div>
-            <div class="color-swatch" data-color="#f59e0b" style="background:#f59e0b;"></div>
+            <input type="color" id="draw-color-picker" value="#ff0000" class="color-picker-input">
           </div>
           <div class="draw-actions">
             <button id="btn-draw-undo" class="draw-icon-btn" title="Undo">↶</button>
@@ -169,7 +187,5 @@
         .catch(err => console.error('Service Worker Registration Failed:', err));
     }
   </script>
-</body>
-</html>
 </body>
 </html>
